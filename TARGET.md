@@ -1,0 +1,63 @@
+# Product target
+
+Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
+
+## P0 — System integration
+
+| Item | Status |
+|---|---|
+| Locate and preserve the existing standalone demo | DONE |
+| Document device, packages and current Hook path | DONE |
+| Fix custom photo page integration mismatch | DONE |
+| Make video playback lifecycle-safe | TODO |
+| Identify the real HyperOS outer-screen Settings page | DONE |
+| Inject a dynamic `自定义` Settings group | DONE |
+| Create multiple user Widgets in the app | TODO |
+| Add/remove a selected custom Widget through the system flow | IN PROGRESS |
+| Render selected custom Widgets in FlipHome | DONE |
+| Verify official ↔ custom ↔ official swiping repeatedly | TODO |
+| Show LSPosed activation and scope diagnostics | DONE |
+| Add global safe mode and crash degradation | TODO |
+
+## P1 — Editor and base components
+
+| Item | Status |
+|---|---|
+| Versioned WidgetConfig schema and migration | TODO |
+| Material 3 app shell and navigation | TODO |
+| Widget list: create/edit/delete/rename/copy/preview/enable | TODO |
+| Canvas editor: drag/resize/layer/delete/copy | TODO |
+| Image, video, text, time and button components | TODO |
+| Volume, flashlight, launch-app and lock actions | TODO |
+| Launchable app picker with icons and labels | TODO |
+| Provider revision and runtime cache invalidation | TODO |
+
+## P2 — Music and lyrics
+
+| Item | Status |
+|---|---|
+| PlaybackProvider abstraction | TODO |
+| MediaSession metadata and transport controls | TODO |
+| LyricsProvider abstraction | TODO |
+| NetEase Cloud Music lyric research and adapter | TODO |
+| Synced current/next lyric components | TODO |
+| Album art, song, artist and playback components | TODO |
+
+## P3 — Quick Settings bridge
+
+| Item | Status |
+|---|---|
+| Research HyperOS SystemUI tile lifecycle and click path | TODO |
+| Discover system and third-party tiles | TODO |
+| Capability matrix and safe adapter | TODO |
+| Editor tile picker and runtime action | TODO |
+
+## P4 — Product completeness
+
+| Item | Status |
+|---|---|
+| Templates as editable WidgetConfig data | TODO |
+| `.mixflipwidget` import/export | TODO |
+| Undo/redo, alignment, grid and advanced layering | TODO |
+| Diagnostics export | TODO |
+| Full regression matrix and release packaging | TODO |
