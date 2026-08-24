@@ -9,7 +9,7 @@ Actions are semantic string identifiers stored on button components. Runtime cod
 | Broadcast | `broadcast` | action | guarded explicit user configuration | Implemented |
 | Volume up/down | `volume_up`, `volume_down` | none | `AudioManager` music stream adjustment | Built; cover test pending |
 | Mute toggle | `mute_toggle` | none | `AudioManager.ADJUST_TOGGLE_MUTE` | Built; cover test pending |
-| Flashlight | `flashlight_on/off/toggle` | none | module-provider `CameraManager.setTorchMode` bridge | Built; physical permission/test pending |
+| Flashlight | `flashlight_on/off/toggle` | none | module-provider `CameraManager.setTorchMode` bridge | Device verified ON→OFF with automatic restoration |
 | Lock screen | `lock_screen` | none | power key injection from privileged FlipHome UID | Permission proven; cover test pending |
 
 ## Security boundaries

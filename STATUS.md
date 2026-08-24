@@ -36,6 +36,9 @@ Last updated: 2026-08-24 08:51 CST
 - Added image-click handling that targets Xiaomi Gallery instead of falling through to the official host's Xiaomi Sports action.
 - All fold simulations now use cleanup traps that always reset `device_state`; every run ends with committed/base state `OPENED` and no override.
 - Built the current component-editor/action milestone as APK 0.4.0-p1; unit tests, Android lint and debug assembly pass.
+- Granted Camera through the standard Android permission flow and verified the auto-restoring flashlight diagnostic in CameraService: camera 0 turned on at 08:55:17 and off at 08:55:18.
+- Verified the launchable-app picker on-device with icons, localized labels, package names and scrolling.
+- Observed a saved user composition containing image + resized time + resized TikTok button; FlipHome reloaded both custom Widget hosts on schema v2 without a crash. Pixel proof remains gated by the secure cover lock screen.
 
 ## IN PROGRESS
 
@@ -55,8 +58,8 @@ Last updated: 2026-08-24 08:51 CST
 
 ## TODO NEXT
 
-1. Physically approve the Camera prompt, run the auto-restoring flashlight diagnostic and record the result.
-2. Save a temporary text/time/button composition, verify it on the unlocked cover, then restore the user's original records.
-3. Verify gallery open/read, volume and lock actions on the cover page.
-4. Complete repeated official ↔ custom ↔ official swipe regression.
+1. Verify the saved image/time/TikTok composition visually on an unlocked cover session.
+2. Verify gallery open/read, volume and lock actions on the cover page.
+3. Complete repeated official ↔ custom ↔ official swipe regression.
+4. Finish component property polish and remove the remaining legacy fixed-button editor projection.
 5. Begin the MediaSession/lyrics provider layer after P1 device gates pass.
