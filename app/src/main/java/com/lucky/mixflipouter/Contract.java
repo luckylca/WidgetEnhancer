@@ -12,6 +12,7 @@ final class Contract {
     static final String DEFAULT_WIDGET_ID = "default";
     static final String RUNTIME_VIEW_TAG = "mixflip_custom_runtime_overlay";
     static final String PREFS = "outer_widget";
+    static final String EXTRA_WIDGET_ID = "widget_id";
     static final int BUTTON_COUNT = 4;
 
     static Uri mediaUri(String widgetId) {
@@ -20,6 +21,12 @@ final class Contract {
 
     static Uri previewUri(String widgetId) {
         return Uri.parse("content://" + AUTHORITY + "/widgets/" + Uri.encode(widgetId) + "/preview");
+    }
+
+    static Uri previewUri(String widgetId, long revision) {
+        return previewUri(widgetId).buildUpon()
+                .appendQueryParameter("revision", Long.toString(revision))
+                .build();
     }
 
     static String widgetFileName(String widgetId) {

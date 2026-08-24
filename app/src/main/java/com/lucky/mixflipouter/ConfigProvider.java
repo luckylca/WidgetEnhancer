@@ -4,10 +4,6 @@ import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
@@ -15,11 +11,15 @@ import android.os.ParcelFileDescriptor;
 
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class ConfigProvider extends ContentProvider {
+    private WidgetRepository repository;
+
     @Override
     public boolean onCreate() {
+        repository = new WidgetRepository(getContext());
         return true;
     }
 
@@ -30,6 +30,7 @@ public final class ConfigProvider extends ContentProvider {
         if ("get_config".equals(method) || "get_widget".equals(method)) {
             return getWidget(arg == null ? Contract.DEFAULT_WIDGET_ID : arg);
         }
+        if ("list_widgets".equals(method)) return listWidgets();
         if ("report_hook".equals(method)) {
             saveHookReport(extras);
             return Bundle.EMPTY;
@@ -38,21 +39,18 @@ public final class ConfigProvider extends ContentProvider {
     }
 
     private Bundle getWidget(String widgetId) {
-        SharedPreferences p = prefs();
+        WidgetConfig config = repository.get(widgetId);
+        return config == null ? null : config.toBundle(repository.revision());
+    }
+
+    private Bundle listWidgets() {
+        long revision = repository.revision();
+        ArrayList<Bundle> widgets = new ArrayList<>();
+        for (WidgetConfig config : repository.list()) widgets.add(config.toBundle(revision));
         Bundle out = new Bundle();
-        out.putInt("schema_version", 1);
-        out.putString("id", Contract.DEFAULT_WIDGET_ID);
-        out.putString("name", p.getString("name", "我的外屏"));
-        out.putBoolean("enabled", p.getBoolean("enabled", true));
-        out.putString("media_type", p.getString("media_type", "none"));
-        out.putString("mime_type", p.getString("mime_type", "application/octet-stream"));
-        out.putBoolean("loop", p.getBoolean("loop", true));
-        out.putBoolean("mute", p.getBoolean("mute", true));
-        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
-            out.putString("button_" + i + "_label", p.getString("button_" + i + "_label", ""));
-            out.putString("button_" + i + "_type", p.getString("button_" + i + "_type", "package"));
-            out.putString("button_" + i + "_value", p.getString("button_" + i + "_value", ""));
-        }
+        out.putInt("schema_version", WidgetRepository.SCHEMA_VERSION);
+        out.putLong("revision", revision);
+        out.putParcelableArrayList("widgets", widgets);
         return out;
     }
 
@@ -82,11 +80,13 @@ public final class ConfigProvider extends ContentProvider {
         enforceAllowedCaller();
         if (!"r".equals(mode)) throw new FileNotFoundException("Read only");
         String kind = lastSegment(uri);
-        File media = new File(getContext().getFilesDir(), "selected_media");
+        String widgetId = widgetId(uri);
+        WidgetConfig config = repository.get(widgetId);
+        File media = repository.mediaFile(widgetId);
         if ("media".equals(kind) && media.isFile()) return readOnly(media);
         if ("preview".equals(kind)) {
-            if (media.isFile()) return readOnly(media);
-            File preview = ensurePlaceholderPreview();
+            File preview = PreviewRenderer.ensure(
+                    getContext(), config, media, repository.revision());
             if (preview.isFile()) return readOnly(preview);
         }
         throw new FileNotFoundException("No file for " + uri);
@@ -95,40 +95,10 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public String getType(Uri uri) {
         enforceAllowedCaller();
-        if ("preview".equals(lastSegment(uri))) {
-            String mediaType = prefs().getString("media_type", "none");
-            if ("none".equals(mediaType)) return "image/png";
-        }
-        return prefs().getString("mime_type", "application/octet-stream");
-    }
-
-    private File ensurePlaceholderPreview() {
-        File file = new File(getContext().getCacheDir(), "widget_preview.png");
-        if (file.isFile()) return file;
-        Bitmap bitmap = Bitmap.createBitmap(604, 696, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        canvas.drawColor(Color.rgb(18, 18, 22));
-        Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
-        accent.setColor(Color.rgb(255, 105, 0));
-        canvas.drawCircle(302, 265, 96, accent);
-        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-        text.setColor(Color.WHITE);
-        text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(48);
-        text.setFakeBoldText(true);
-        canvas.drawText("自定义外屏", 302, 450, text);
-        text.setTextSize(30);
-        text.setFakeBoldText(false);
-        text.setColor(Color.LTGRAY);
-        canvas.drawText("图片 · 视频 · 快捷按键", 302, 505, text);
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 95, out);
-        } catch (Throwable ignored) {
-            file.delete();
-        } finally {
-            bitmap.recycle();
-        }
-        return file;
+        WidgetConfig config = repository.get(widgetId(uri));
+        if (config == null) return "application/octet-stream";
+        if ("preview".equals(lastSegment(uri))) return "image/png";
+        return config.mimeType;
     }
 
     private SharedPreferences prefs() {
@@ -137,6 +107,12 @@ public final class ConfigProvider extends ContentProvider {
 
     private static String lastSegment(Uri uri) {
         return uri.getLastPathSegment() == null ? "" : uri.getLastPathSegment();
+    }
+
+    private static String widgetId(Uri uri) {
+        List<String> parts = uri.getPathSegments();
+        return parts.size() >= 2 && "widgets".equals(parts.get(0))
+                ? parts.get(1) : Contract.DEFAULT_WIDGET_ID;
     }
 
     private static ParcelFileDescriptor readOnly(File file) throws FileNotFoundException {

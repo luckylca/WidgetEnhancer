@@ -7,11 +7,13 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -31,7 +33,7 @@ final class MediaWidgetView extends FrameLayout {
         super(context);
         this.config = config;
         setBackgroundColor(Color.BLACK);
-        setClipToPadding(true);
+        applyOfficialWidgetOutline();
         createMediaLayer();
         createButtonLayer();
     }
@@ -55,6 +57,20 @@ final class MediaWidgetView extends FrameLayout {
         } else {
             showPlaceholder("MIX Flip 外屏扩展\n请在模块 App 中选择图片或视频");
         }
+    }
+
+    private void applyOfficialWidgetOutline() {
+        int radiusId = getResources().getIdentifier(
+                "launcher_widget_radius", "dimen", Contract.TARGET_PACKAGE);
+        final float radius = radiusId == 0
+                ? dp(20) : getResources().getDimension(radiusId);
+        setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+            }
+        });
+        setClipToOutline(true);
     }
 
     private void preparePlayer(MediaPlayer player) {

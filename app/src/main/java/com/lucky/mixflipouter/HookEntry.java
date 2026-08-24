@@ -49,22 +49,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     widgets.removeIf(HookEntry::isOurInfo);
 
                     Context context = currentFlipHomeContext();
-                    WidgetConfig config = context == null ? null : WidgetConfig.load(context);
-                    if (config == null || !config.enabled) {
-                        report(context, "catalogue", false, "配置不可用或已停用");
+                    List<WidgetConfig> configs = context == null
+                            ? java.util.Collections.emptyList() : WidgetConfig.list(context);
+                    int added = 0;
+                    for (WidgetConfig config : configs) {
+                        if (!config.enabled) continue;
+                        Object info = createWidgetInfo(infoClass, config, widgets.size());
+                        widgets.add(info);
+                        added++;
+                    }
+                    if (added == 0) {
+                        report(context, "catalogue", false, "没有已启用的自定义 Widget");
                         return;
                     }
-
-                    Object info = XposedHelpers.newInstance(infoClass, Contract.widgetFileName(config.id));
-                    XposedHelpers.setObjectField(info, "mTypeTag", Contract.CUSTOM_TYPE);
-                    XposedHelpers.setObjectField(info, "mTitle", config.name);
-                    XposedHelpers.setObjectField(info, "mCategory", Contract.CUSTOM_TYPE);
-                    XposedHelpers.setObjectField(info, "mAppPackageName", Contract.MODULE_PACKAGE);
-                    XposedHelpers.setObjectField(info, "mResPath", fallbackMamlPath);
-                    XposedHelpers.setIntField(info, "mShowInSetPage", widgets.size());
-                    setAllPreviewFields(info, Contract.previewUri(config.id).toString());
-                    widgets.add(info);
-                    report(context, "catalogue", true, "已注入官方列表");
+                    report(context, "catalogue", true, "已注入 " + added + " 个 Widget");
                 } catch (Throwable error) {
                     report(currentFlipHomeContext(), "catalogue", false, error.toString());
                     XposedBridge.log("MixFlipCustom: catalogue injection failed: " + error);
@@ -130,6 +128,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             WidgetConfig config = WidgetConfig.load(context, widgetId);
                             if (config == null) {
                                 report(context, "runtime", false, "找不到 Widget 配置: " + widgetId);
+                                hook.setResult(null);
                                 return;
                             }
                             removeExistingOverlay(host);
@@ -138,7 +137,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             host.addView(overlay, new FrameLayout.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT));
-                            report(context, "runtime", true, "运行时视图已创建: " + widgetId);
+                            overlay.post(() -> report(context, "runtime", true,
+                                    "运行时视图已创建: " + widgetId
+                                            + " · " + overlay.getWidth() + "×" + overlay.getHeight()
+                                            + " · host " + host.getWidth() + "×" + host.getHeight()));
                         } catch (Throwable error) {
                             report(context, "runtime", false, error.toString());
                             XposedBridge.log("MixFlipCustom: runtime overlay failed: " + error);
@@ -159,6 +161,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    private static Object createWidgetInfo(Class<?> infoClass, WidgetConfig config, int priority) {
+        Object info = XposedHelpers.newInstance(infoClass, Contract.widgetFileName(config.id));
+        XposedHelpers.setObjectField(info, "mTypeTag", Contract.CUSTOM_TYPE);
+        XposedHelpers.setObjectField(info, "mTitle", config.name);
+        XposedHelpers.setObjectField(info, "mCategory", Contract.CUSTOM_TYPE);
+        XposedHelpers.setObjectField(info, "mAppPackageName", Contract.MODULE_PACKAGE);
+        XposedHelpers.setObjectField(info, "mResPath", fallbackMamlPath);
+        XposedHelpers.setIntField(info, "mShowInSetPage", priority);
+        setAllPreviewFields(info, Contract.previewUri(config.id, config.repositoryRevision).toString());
+        return info;
     }
 
     private static boolean isOurInfo(Object info) {

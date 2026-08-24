@@ -12,7 +12,7 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 | Make video playback lifecycle-safe | TODO |
 | Identify the real HyperOS outer-screen Settings page | DONE |
 | Inject a dynamic `自定义` Settings group | DONE |
-| Create multiple user Widgets in the app | TODO |
+| Create multiple user Widgets in the app | DONE |
 | Add/remove a selected custom Widget through the system flow | IN PROGRESS |
 | Render selected custom Widgets in FlipHome | DONE |
 | Verify official ↔ custom ↔ official swiping repeatedly | TODO |
@@ -23,14 +23,14 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 
 | Item | Status |
 |---|---|
-| Versioned WidgetConfig schema and migration | TODO |
-| Material 3 app shell and navigation | TODO |
-| Widget list: create/edit/delete/rename/copy/preview/enable | TODO |
+| Versioned WidgetConfig schema and migration | IN PROGRESS |
+| Material 3 app shell and navigation | IN PROGRESS |
+| Widget list: create/edit/delete/rename/copy/preview/enable | DONE |
 | Canvas editor: drag/resize/layer/delete/copy | TODO |
 | Image, video, text, time and button components | TODO |
 | Volume, flashlight, launch-app and lock actions | TODO |
 | Launchable app picker with icons and labels | TODO |
-| Provider revision and runtime cache invalidation | TODO |
+| Provider revision and runtime cache invalidation | IN PROGRESS |
 
 ## P2 — Music and lyrics
 
