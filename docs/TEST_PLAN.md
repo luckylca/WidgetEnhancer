@@ -36,3 +36,11 @@
 - reboot and LSPosed restart
 - provider unavailable, invalid JSON and stale schema
 
+## Import/export
+
+- export with and without media
+- verify exact ZIP entry set, manifest/schema versions, media size and SHA-256
+- import creates a new UUID and unique name without overwriting the source
+- reject duplicate/unknown entries, future versions, oversized JSON/media and hash mismatch
+- verify Xiaomi secure picker can see `.mixflipwidget.zip`
+- delete the imported test copy and confirm original IDs/assets remain unchanged

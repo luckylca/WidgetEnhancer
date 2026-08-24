@@ -253,6 +253,28 @@ final class WidgetConfig {
         components.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
     }
 
+    /** Mirrors the first four canvas buttons into fields used by the compatibility editor. */
+    void syncLegacyActionsFromComponents() {
+        ArrayList<WidgetComponent> buttons = new ArrayList<>();
+        for (WidgetComponent component : components) {
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type)) buttons.add(component);
+        }
+        buttons.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
+        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
+            if (i < buttons.size()) {
+                WidgetComponent button = buttons.get(i);
+                labels[i] = button.content;
+                actionTypes[i] = button.actionType.isEmpty()
+                        ? ActionSpec.LAUNCH_APP : button.actionType;
+                actionValues[i] = button.actionValue;
+            } else {
+                labels[i] = "";
+                actionTypes[i] = ActionSpec.LAUNCH_APP;
+                actionValues[i] = "";
+            }
+        }
+    }
+
     private boolean isLegacyActionActive(int index) {
         if (labels[index].trim().isEmpty()) return false;
         return !ActionSpec.requiresValue(actionTypes[index])

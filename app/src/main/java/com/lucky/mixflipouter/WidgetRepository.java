@@ -80,6 +80,38 @@ final class WidgetRepository {
         }
     }
 
+    WidgetConfig createFromTemplate(WidgetConfig template) {
+        synchronized (LOCK) {
+            State state = readState();
+            String id = UUID.randomUUID().toString();
+            WidgetConfig config = template.duplicate(id, uniqueName(state, template.name));
+            state.widgets.add(config);
+            writeNext(state);
+            return config;
+        }
+    }
+
+    WidgetConfig importPackage(WidgetConfig source, File mediaSource) throws Exception {
+        synchronized (LOCK) {
+            State state = readState();
+            String id = UUID.randomUUID().toString();
+            WidgetConfig imported = source.duplicate(id, uniqueName(state, source.name));
+            File destination = mediaFile(id);
+            try {
+                if (mediaSource != null && mediaSource.isFile()) {
+                    copyFileChecked(mediaSource, destination);
+                }
+                state.widgets.add(imported);
+                writeNext(state);
+                return imported;
+            } catch (Throwable error) {
+                deleteTree(widgetDir(id));
+                if (error instanceof Exception) throw (Exception) error;
+                throw new IllegalStateException("无法导入 Widget", error);
+            }
+        }
+    }
+
     WidgetConfig duplicate(String id) {
         synchronized (LOCK) {
             State state = readState();
@@ -251,6 +283,24 @@ final class WidgetRepository {
         }
     }
 
+    private static void copyFileChecked(File source, File target) throws Exception {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IllegalStateException("无法创建媒体目录");
+        }
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(target, false)) {
+            byte[] buffer = new byte[64 * 1024];
+            int count;
+            while ((count = in.read(buffer)) >= 0) out.write(buffer, 0, count);
+            out.getFD().sync();
+        } catch (Throwable error) {
+            target.delete();
+            if (error instanceof Exception) throw (Exception) error;
+            throw new IllegalStateException("无法复制媒体", error);
+        }
+    }
+
     private static void deleteTree(File file) {
         File[] children = file.listFiles();
         if (children != null) for (File child : children) deleteTree(child);
@@ -260,6 +310,21 @@ final class WidgetRepository {
     private static String normalizeName(String value, String fallback) {
         if (value == null || value.trim().isEmpty()) return fallback;
         return value.trim();
+    }
+
+    private static String uniqueName(State state, String requested) {
+        String base = normalizeName(requested, "导入的 Widget");
+        String candidate = base;
+        int suffix = 2;
+        while (containsName(state, candidate)) candidate = base + " " + suffix++;
+        return candidate;
+    }
+
+    private static boolean containsName(State state, String name) {
+        for (WidgetConfig config : state.widgets) {
+            if (name.equals(config.name)) return true;
+        }
+        return false;
     }
 
     private static final class State {

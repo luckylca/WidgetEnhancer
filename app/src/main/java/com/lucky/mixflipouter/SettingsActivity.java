@@ -34,6 +34,8 @@ import java.util.List;
 
 public final class SettingsActivity extends Activity {
     private static final int REQUEST_CAMERA_FOR_TORCH = 2101;
+    private static final int REQUEST_IMPORT_WIDGET = 3101;
+    private static final int REQUEST_EXPORT_WIDGET = 3102;
     private WidgetRepository repository;
     private LinearLayout widgetList;
     private TextView countText;
@@ -42,11 +44,13 @@ public final class SettingsActivity extends Activity {
     private MaterialButton torchPermission;
     private MaterialButton torchTest;
     private MaterialButton mediaAccess;
+    private String pendingExportId;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         repository = new WidgetRepository(this);
+        if (state != null) pendingExportId = state.getString("pending_export_id");
         setContentView(createContent());
     }
 
@@ -98,6 +102,15 @@ public final class SettingsActivity extends Activity {
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         sectionTitle.addView(countText);
         root.addView(sectionTitle, marginTop(dp(26)));
+
+        LinearLayout libraryActions = horizontal();
+        MaterialButton templates = outlinedButton("使用模板", v -> showTemplateDialog());
+        libraryActions.addView(templates, weighted());
+        MaterialButton importWidget = outlinedButton("导入文件", v -> beginImport());
+        LinearLayout.LayoutParams importParams = weighted();
+        importParams.setMarginStart(dp(8));
+        libraryActions.addView(importWidget, importParams);
+        root.addView(libraryActions, marginTop(dp(12)));
 
         widgetList = new LinearLayout(this);
         widgetList.setOrientation(LinearLayout.VERTICAL);
@@ -277,6 +290,8 @@ public final class SettingsActivity extends Activity {
         actions.addView(edit, weighted());
         MaterialButton copy = textButton("复制", v -> duplicate(config.id));
         actions.addView(copy, weighted());
+        MaterialButton export = textButton("导出", v -> beginExport(config));
+        actions.addView(export, weighted());
         MaterialButton delete = textButton("删除", v -> confirmDelete(config));
         delete.setTextColor(color(android.R.attr.colorError));
         actions.addView(delete, weighted());
@@ -318,6 +333,98 @@ public final class SettingsActivity extends Activity {
                     edit(created.id);
                 })
                 .show();
+    }
+
+    private void showTemplateDialog() {
+        List<WidgetTemplates.Template> templates = WidgetTemplates.all();
+        String[] labels = new String[templates.size()];
+        for (int i = 0; i < templates.size(); i++) {
+            WidgetTemplates.Template template = templates.get(i);
+            labels[i] = template.name + "\n" + template.description;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("选择模板")
+                .setItems(labels, (dialog, which) -> {
+                    WidgetConfig created = repository.createFromTemplate(templates.get(which).config);
+                    Toast.makeText(this, "已从模板创建“" + created.name + "”", Toast.LENGTH_SHORT).show();
+                    edit(created.id);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void beginImport() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/zip")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_IMPORT_WIDGET);
+    }
+
+    private void beginExport(WidgetConfig config) {
+        pendingExportId = config.id;
+        String fileName = config.name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (fileName.isEmpty()) fileName = "mixflip-widget";
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                // Xiaomi's secure picker hides unknown extensions, so keep a ZIP suffix visible.
+                .setType("application/zip")
+                .putExtra(Intent.EXTRA_TITLE, fileName + ".mixflipwidget.zip")
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_EXPORT_WIDGET);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            if (requestCode == REQUEST_EXPORT_WIDGET) pendingExportId = null;
+            return;
+        }
+        Uri uri = data.getData();
+        if (requestCode == REQUEST_IMPORT_WIDGET) {
+            Toast.makeText(this, "正在校验并导入…", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                try {
+                    WidgetConfig imported = WidgetPackage.importWidget(this, repository, uri);
+                    runOnUiThread(() -> {
+                        renderWidgets();
+                        Toast.makeText(this, "已导入“" + imported.name + "”", Toast.LENGTH_SHORT).show();
+                        edit(imported.id);
+                    });
+                } catch (Throwable error) {
+                    runOnUiThread(() -> Toast.makeText(this,
+                            "导入失败：" + safeMessage(error), Toast.LENGTH_LONG).show());
+                }
+            }, "widget-import").start();
+        } else if (requestCode == REQUEST_EXPORT_WIDGET && pendingExportId != null) {
+            String exportId = pendingExportId;
+            pendingExportId = null;
+            Toast.makeText(this, "正在打包导出…", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                try {
+                    WidgetPackage.exportWidget(this, repository, exportId, uri);
+                    runOnUiThread(() -> Toast.makeText(this,
+                            "导出完成", Toast.LENGTH_SHORT).show());
+                } catch (Throwable error) {
+                    runOnUiThread(() -> Toast.makeText(this,
+                            "导出失败：" + safeMessage(error), Toast.LENGTH_LONG).show());
+                }
+            }, "widget-export").start();
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString("pending_export_id", pendingExportId);
+    }
+
+    private static String safeMessage(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.trim().isEmpty()
+                ? error.getClass().getSimpleName() : message;
     }
 
     private void duplicate(String id) {

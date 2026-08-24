@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public final class WidgetSchemaTest {
     @Test
@@ -191,5 +192,81 @@ public final class WidgetSchemaTest {
         WidgetComponent restored = WidgetComponent.fromJson(artwork.toJson());
         assertEquals(WidgetComponent.TYPE_ALBUM_ART, restored.type);
         assertEquals(20f, restored.cornerRadius, 0.001f);
+    }
+
+    @Test
+    public void builtInTemplatesAreEditableWidgetConfigData() {
+        List<WidgetTemplates.Template> templates = WidgetTemplates.all();
+        assertEquals(5, templates.size());
+        WidgetTemplates.Template music = templates.stream()
+                .filter(template -> "music".equals(template.id))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertTrue(music.config.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_ALBUM_ART.equals(component.type)));
+        assertTrue(music.config.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)));
+        assertTrue(music.config.components.stream().anyMatch(component ->
+                ActionSpec.MEDIA_PLAY_PAUSE.equals(component.actionType)));
+        assertEquals("上一曲", music.config.labels[0]);
+        assertEquals(ActionSpec.MEDIA_PLAY_PAUSE, music.config.actionTypes[1]);
+        WidgetTemplates.Template photo = templates.stream()
+                .filter(template -> "photo".equals(template.id))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertFalse(photo.config.enabled);
+        assertEquals(WidgetComponent.TYPE_IMAGE, photo.config.mediaType);
+    }
+
+    @Test
+    public void packageSanitizerClampsGeometryAndDegradesMissingMedia() {
+        WidgetConfig config = new WidgetConfig();
+        config.name = "  imported  ";
+        config.mediaType = WidgetComponent.TYPE_IMAGE;
+        config.mimeType = "image/jpeg";
+        config.components.add(WidgetComponent.media(WidgetComponent.TYPE_IMAGE));
+        WidgetComponent text = new WidgetComponent();
+        text.type = WidgetComponent.TYPE_TEXT;
+        text.x = -500;
+        text.y = 900;
+        text.width = 900;
+        text.height = 900;
+        config.components.add(text);
+
+        WidgetPackage.sanitize(config, false);
+
+        assertEquals("imported", config.name);
+        assertEquals("none", config.mediaType);
+        assertFalse(config.enabled);
+        assertFalse(config.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_IMAGE.equals(component.type)));
+        assertEquals(0f, text.x, 0.001f);
+        assertTrue(text.y < WidgetConfig.CANVAS_HEIGHT);
+        assertTrue(text.width <= WidgetConfig.CANVAS_WIDTH);
+        assertTrue(text.height <= WidgetConfig.CANVAS_HEIGHT - text.y);
+    }
+
+    @Test
+    public void packageSanitizerRejectsUnsafeStyleAndActionValues() {
+        WidgetConfig config = new WidgetConfig();
+        WidgetComponent button = WidgetComponent.button(
+                "动作", "future_privileged_action", "secret", 1, 1, 100, 80, 100_000);
+        button.opacity = Float.NaN;
+        button.cornerRadius = Float.POSITIVE_INFINITY;
+        button.textSize = 50_000;
+        button.color = "not-a-color";
+        button.fillMode = "future-mode";
+        button.textAlign = "diagonal";
+        config.components.add(button);
+
+        WidgetPackage.sanitize(config, false);
+
+        assertEquals("", button.actionType);
+        assertEquals("", button.actionValue);
+        assertTrue(Float.isFinite(button.opacity));
+        assertTrue(button.cornerRadius <= 40f);
+        assertEquals(200f, button.textSize, 0.001f);
+        assertEquals("#FFFFFFFF", button.color);
+        assertEquals("cover", button.fillMode);
+        assertEquals("center", button.textAlign);
+        assertEquals(10_000, button.zIndex);
     }
 }

@@ -15,7 +15,7 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 | Create multiple user Widgets in the app | DONE |
 | Add/remove a selected custom Widget through the system flow | DONE |
 | Render selected custom Widgets in FlipHome | DONE |
-| Verify official ↔ custom ↔ official swiping repeatedly | TODO |
+| Verify official ↔ custom ↔ official swiping repeatedly | BLOCKED |
 | Show LSPosed activation and scope diagnostics | DONE |
 | Add global safe mode and crash degradation | DONE |
 
@@ -36,9 +36,9 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 
 | Item | Status |
 |---|---|
-| PlaybackProvider abstraction | IN PROGRESS |
+| PlaybackProvider abstraction | DONE |
 | MediaSession metadata and transport controls | IN PROGRESS |
-| LyricsProvider abstraction | IN PROGRESS |
+| LyricsProvider abstraction | DONE |
 | NetEase Cloud Music lyric research and adapter | IN PROGRESS |
 | Synced current/next lyric components | IN PROGRESS |
 | Album art, song, artist and playback components | IN PROGRESS |
@@ -56,8 +56,9 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 
 | Item | Status |
 |---|---|
-| Templates as editable WidgetConfig data | TODO |
-| `.mixflipwidget` import/export | TODO |
+| Templates as editable WidgetConfig data | DONE |
+| `.mixflipwidget.zip` import/export | DONE |
+| Import/export security bounds and device round trip | DONE |
 | Undo/redo, alignment, grid and advanced layering | TODO |
 | Diagnostics export | TODO |
 | Full regression matrix and release packaging | TODO |

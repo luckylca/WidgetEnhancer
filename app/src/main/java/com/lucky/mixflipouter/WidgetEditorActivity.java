@@ -557,18 +557,8 @@ public final class WidgetEditorActivity extends Activity {
     }
 
     private void syncLegacyFieldsFromComponents() {
-        ArrayList<WidgetComponent> buttons = buttonComponents();
+        config.syncLegacyActionsFromComponents();
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
-            if (i < buttons.size()) {
-                WidgetComponent component = buttons.get(i);
-                config.labels[i] = component.content;
-                config.actionTypes[i] = component.actionType.isEmpty() ? "package" : component.actionType;
-                config.actionValues[i] = component.actionValue;
-            } else {
-                config.labels[i] = "";
-                config.actionTypes[i] = "package";
-                config.actionValues[i] = "";
-            }
             if (labels[i] != null) labels[i].setText(config.labels[i]);
             if (types[i] != null) types[i].setSelection(typeIndex(config.actionTypes[i]));
             if (values[i] != null) values[i].setText(config.actionValues[i]);
