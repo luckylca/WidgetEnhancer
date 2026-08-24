@@ -14,6 +14,7 @@ Actions are semantic string identifiers stored on button components. Runtime cod
 | Previous track | `media_previous` | none | guarded `PlaybackProvider` / `MediaController.TransportControls` | Built; notification access and device test pending |
 | Play/pause | `media_play_pause` | none | guarded `PlaybackProvider` / `MediaController.TransportControls` | Built; notification access and device test pending |
 | Next track | `media_next` | none | guarded `PlaybackProvider` / `MediaController.TransportControls` | Built; notification access and device test pending |
+| Quick Settings tile | `qs_tile` | active tile spec | optional SystemUI bridge delegates to the live `QSTile` object | Discovery/guard UX verified; live click pending optional scope |
 
 ## Security boundaries
 
@@ -22,6 +23,8 @@ Actions are semantic string identifiers stored on button components. Runtime cod
 - Flashlight requires standard user-approved Camera permission and targets only a detected back-facing flash camera.
 - MediaSession data and transport controls require the user to explicitly enable the module's notification listener in Android settings.
 - Synchronized NetEase lyrics require the separate optional `com.netease.cloudmusic` LSPosed scope; the NetEase UID can only publish bounded lyric data and adapter health.
+- Quick Settings actions require the optional `com.android.systemui` scope. Only the SystemUI UID can publish/take/complete bounded requests, and only active available specs can be submitted.
+- Installed third-party `TileService` entries are discovery-only until the user adds them to HyperOS control center; the module never binds to them directly.
 - Unsupported or denied operations return a structured failure and show a fallback toast instead of crashing FlipHome.
 - Safe mode suppresses all custom runtime data while preserving user configuration.
 

@@ -181,7 +181,8 @@ final class WidgetPackage {
                 || ActionSpec.FLASHLIGHT_ON.equals(type) || ActionSpec.FLASHLIGHT_OFF.equals(type)
                 || ActionSpec.FLASHLIGHT_TOGGLE.equals(type) || ActionSpec.LOCK_SCREEN.equals(type)
                 || ActionSpec.MEDIA_PREVIOUS.equals(type)
-                || ActionSpec.MEDIA_PLAY_PAUSE.equals(type) || ActionSpec.MEDIA_NEXT.equals(type);
+                || ActionSpec.MEDIA_PLAY_PAUSE.equals(type) || ActionSpec.MEDIA_NEXT.equals(type)
+                || ActionSpec.QS_TILE.equals(type);
     }
 
     private static boolean knownFillMode(String value) {

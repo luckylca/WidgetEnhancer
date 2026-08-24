@@ -31,18 +31,20 @@ public final class WidgetEditorActivity extends Activity {
     private static final int PICK_IMAGE = 1001;
     private static final int PICK_VIDEO = 1002;
     private static final int PICK_APP = 1003;
+    private static final int PICK_QS_TILE = 1004;
     private static final String[] TYPE_LABELS = {
             "启动应用", "打开 URI", "发送广播",
             "音量＋", "音量－", "静音切换",
             "打开手电筒", "关闭手电筒", "切换手电筒", "锁屏",
-            "上一曲", "播放 / 暂停", "下一曲"
+            "上一曲", "播放 / 暂停", "下一曲", "快捷设置磁贴"
     };
     private static final String[] TYPE_VALUES = {
             ActionSpec.LAUNCH_APP, ActionSpec.OPEN_URI, ActionSpec.SEND_BROADCAST,
             ActionSpec.VOLUME_UP, ActionSpec.VOLUME_DOWN, ActionSpec.MUTE_TOGGLE,
             ActionSpec.FLASHLIGHT_ON, ActionSpec.FLASHLIGHT_OFF,
             ActionSpec.FLASHLIGHT_TOGGLE, ActionSpec.LOCK_SCREEN,
-            ActionSpec.MEDIA_PREVIOUS, ActionSpec.MEDIA_PLAY_PAUSE, ActionSpec.MEDIA_NEXT
+            ActionSpec.MEDIA_PREVIOUS, ActionSpec.MEDIA_PLAY_PAUSE, ActionSpec.MEDIA_NEXT,
+            ActionSpec.QS_TILE
     };
 
     private WidgetRepository repository;
@@ -151,6 +153,7 @@ public final class WidgetEditorActivity extends Activity {
         layerActions.addView(button("上移一层", v -> canvasView.moveLayer(1)), weighted());
         root.addView(layerActions, matchWrap());
         root.addView(button("为选中按钮选择应用", v -> chooseAppForSelected()), matchWrap());
+        root.addView(button("为选中按钮选择快捷设置磁贴", v -> chooseQSTileForSelected()), matchWrap());
 
         section(root, "背景媒体");
         mediaStatus = text("尚未选择媒体", 14, 0xFF666666);
@@ -265,6 +268,18 @@ public final class WidgetEditorActivity extends Activity {
             component.actionType = ActionSpec.LAUNCH_APP;
             component.actionValue = data.getStringExtra(AppPickerActivity.EXTRA_COMPONENT);
             String label = data.getStringExtra(AppPickerActivity.EXTRA_LABEL);
+            if (label != null && !label.isEmpty()) component.content = label;
+            canvasView.invalidate();
+            updateSelectionStatus(component);
+            syncLegacyFieldsFromComponents();
+            return;
+        }
+        if (requestCode == PICK_QS_TILE) {
+            WidgetComponent component = canvasView.getSelected();
+            if (component == null || !WidgetComponent.TYPE_BUTTON.equals(component.type)) return;
+            component.actionType = ActionSpec.QS_TILE;
+            component.actionValue = data.getStringExtra(QSTilePickerActivity.EXTRA_SPEC);
+            String label = data.getStringExtra(QSTilePickerActivity.EXTRA_LABEL);
             if (label != null && !label.isEmpty()) component.content = label;
             canvasView.invalidate();
             updateSelectionStatus(component);
@@ -421,6 +436,15 @@ public final class WidgetEditorActivity extends Activity {
             return;
         }
         startActivityForResult(new Intent(this, AppPickerActivity.class), PICK_APP);
+    }
+
+    private void chooseQSTileForSelected() {
+        WidgetComponent selected = canvasView.getSelected();
+        if (selected == null || !WidgetComponent.TYPE_BUTTON.equals(selected.type)) {
+            Toast.makeText(this, "请先点选一个按钮组件", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        startActivityForResult(new Intent(this, QSTilePickerActivity.class), PICK_QS_TILE);
     }
 
     private void duplicateSelected() {

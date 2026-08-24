@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-24 10:00 CST
+Last updated: 2026-08-24 10:27 CST
 
 Current development build: `0.6.0-p1` (versionCode 7), targeting Xiaomi MIX Flip 1
 `ruyi`, Android 16 / HyperOS 3.0.303.0.
@@ -33,6 +33,10 @@ Current development build: `0.6.0-p1` (versionCode 7), targeting Xiaomi MIX Flip
 - Added photo, video, music/lyrics, quick-control and clock templates as editable `WidgetConfig` data.
 - Added versioned `.mixflipwidget.zip` import/export with entry allowlisting, size limits, schema checks, media SHA-256 and failure cleanup.
 - Completed a real-device export/import round trip. The imported video hash matched the source; the temporary Widget and Download package were removed, while the original two IDs and source hash remained unchanged.
+- Reverse-engineered HyperOS SystemUI's active `QSTile` host and added an optional SystemUI-scoped bridge that delegates to the real live tile instead of binding directly to third-party services.
+- Added a tile picker that merges active SystemUI tiles with installed `TileService` capabilities. Installed-but-not-active and unavailable tiles remain visible but disabled.
+- Added a bounded, caller-checked, expiring QS request mailbox plus unit coverage. ADB shell was rejected from both SystemUI-only and FlipHome-only provider methods.
+- Verified the discovery-only picker and disabled-tile warning on the physical phone while preserving both user Widgets and the unfolded device state.
 - `testDebugUnitTest`, `lintDebug` and `assembleDebug` pass together for the current milestone.
 
 ## IN PROGRESS
@@ -41,7 +45,7 @@ Current development build: `0.6.0-p1` (versionCode 7), targeting Xiaomi MIX Flip
 - P1: prove saved text/time/button composition and Gallery read grant on the unlocked cover runtime.
 - P1: verify volume, lock and flashlight actions from the real cover page.
 - P2: device-test MediaSession and NetEase lyrics after the user grants notification access and enables the optional scope.
-- P3: research and implement the Quick Settings Tile bridge.
+- P3: enable the optional SystemUI scope and prove editor selection plus a real SystemUI tile click.
 - P4: diagnostics page/report and full release regression.
 
 ## FAILED / LEARNED
@@ -55,10 +59,11 @@ Current development build: `0.6.0-p1` (versionCode 7), targeting Xiaomi MIX Flip
 - Pixel-level locked-cover screenshots and repeated official/custom/official swipe validation require the user to unlock the cover; the module does not bypass authentication.
 - MediaSession verification requires manual notification-listener approval.
 - NetEase lyric verification requires manually adding `com.netease.cloudmusic` to the LSPosed module scope and restarting it.
+- QS execution verification requires manually adding `com.android.systemui` to the LSPosed scope and restarting SystemUI or rebooting.
 
 ## TODO NEXT
 
-1. Research the HyperOS Quick Settings Tile discovery and execution path.
+1. Complete the live QS bridge test after the optional SystemUI scope is enabled.
 2. Add a diagnostics page and versioned diagnostic-report export.
 3. Complete MediaSession/NetEase playback tests when the two manual grants are ready.
 4. Run controlled cover swiping, screen-off/on, process-death and restart matrices with cleanup traps.

@@ -163,6 +163,8 @@ public final class SettingsActivity extends Activity {
         mediaAccess = outlinedButton("授予媒体通知访问", v -> startActivity(
                 new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         body.addView(mediaAccess, matchWrap());
+        body.addView(outlinedButton("查看快捷设置磁贴", v -> startActivity(
+                new Intent(this, QSTilePickerActivity.class))), matchWrap());
 
         LinearLayout actions = horizontal();
         MaterialButton official = outlinedButton("打开系统小部件", v -> openOfficialWidgets());
@@ -465,11 +467,13 @@ public final class SettingsActivity extends Activity {
             boolean compatibility = health != null && health.getBoolean("compatibility_ok");
             boolean liveRefresh = health != null && health.getBoolean("live_refresh_ok");
             boolean lyrics = health != null && health.getBoolean("lyrics_ok");
+            boolean qs = health != null && health.getBoolean("qs_ok");
             hookStatus.setText((compatibility ? "✓" : "○") + " 兼容检查    "
                     + (catalogue ? "✓" : "○") + " 系统列表\n"
                     + (runtime ? "✓" : "○") + " 外屏运行时    "
                     + (liveRefresh ? "✓" : "○") + " 即时刷新\n"
-                    + (lyrics ? "✓" : "○") + " 网易云歌词适配");
+                    + (lyrics ? "✓" : "○") + " 网易云歌词适配    "
+                    + (qs ? "✓" : "○") + " QS 磁贴桥接");
             hookStatus.setTextColor(color(catalogue
                     ? androidx.appcompat.R.attr.colorPrimary
                     : com.google.android.material.R.attr.colorOnSurfaceVariant));

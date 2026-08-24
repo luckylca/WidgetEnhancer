@@ -123,6 +123,7 @@ public final class WidgetSchemaTest {
         assertTrue(ActionSpec.isMediaControl(ActionSpec.MEDIA_NEXT));
         assertFalse(ActionSpec.requiresValue(ActionSpec.MEDIA_PLAY_PAUSE));
         assertFalse(ActionSpec.isMediaControl(ActionSpec.VOLUME_UP));
+        assertTrue(ActionSpec.requiresValue(ActionSpec.QS_TILE));
     }
 
     @Test

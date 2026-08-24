@@ -46,6 +46,10 @@
             android:name=".AppPickerActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".QSTilePickerActivity"
+            android:exported="false" />
+
         <provider
             android:name=".ConfigProvider"
             android:authorities="com.lucky.mixflipouter.provider"

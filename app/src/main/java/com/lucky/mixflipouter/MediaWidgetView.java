@@ -333,8 +333,9 @@ final class MediaWidgetView extends FrameLayout {
                 adjustMusicVolume(AudioManager.ADJUST_LOWER);
             } else if (ActionSpec.MUTE_TOGGLE.equals(type)) {
                 adjustMusicVolume(AudioManager.ADJUST_TOGGLE_MUTE);
-            } else if (ActionSpec.isFlashlight(type) || ActionSpec.isMediaControl(type)) {
-                performProviderAction(type);
+            } else if (ActionSpec.isFlashlight(type) || ActionSpec.isMediaControl(type)
+                    || ActionSpec.QS_TILE.equals(type)) {
+                performProviderAction(type, value);
             } else if (ActionSpec.LOCK_SCREEN.equals(type)) {
                 lockScreen();
             } else if (ActionSpec.OPEN_URI.equals(type)) {
@@ -370,9 +371,11 @@ final class MediaWidgetView extends FrameLayout {
         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI);
     }
 
-    private void performProviderAction(String type) {
+    private void performProviderAction(String type, String value) {
+        Bundle extras = new Bundle();
+        extras.putString("value", value);
         Bundle result = getContext().getContentResolver().call(
-                Contract.PROVIDER_URI, "execute_action", type, null);
+                Contract.PROVIDER_URI, "execute_action", type, extras);
         if (result == null || !result.getBoolean("ok")) {
             throw new IllegalStateException(result == null
                     ? "动作服务无响应" : result.getString("message", "动作执行失败"));

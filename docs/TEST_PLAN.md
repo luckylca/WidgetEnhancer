@@ -29,6 +29,16 @@
 - lock screen
 - unsupported capabilities must report a deterministic reason
 
+## Quick Settings bridge
+
+- without the SystemUI scope, list installed `TileService` entries as disabled and reject execution
+- reject shell/non-SystemUI snapshot publication and request consumption
+- after enabling the scope, verify heartbeat, active built-in tiles and active custom tiles
+- block installed-but-not-active and `STATE_UNAVAILABLE` tiles
+- click an active reversible tile and verify state through SystemUI, then restore its initial state
+- expire unclaimed requests and invalidate the bridge after a SystemUI restart/heartbeat timeout
+- verify unlock/panel-dependent tiles retain SystemUI behavior and never bypass authentication
+
 ## Stability
 
 - restart FlipHome, Settings, SystemUI and NetEase

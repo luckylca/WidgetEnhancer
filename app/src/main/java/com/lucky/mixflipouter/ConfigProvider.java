@@ -22,6 +22,7 @@ import java.util.List;
 public final class ConfigProvider extends ContentProvider {
     private WidgetRepository repository;
     private LyricsProvider lyricsProvider;
+    private QSTileBridgeStore qsTileBridge;
     private CameraManager cameraManager;
     private String torchCameraId;
     private volatile boolean torchOn;
@@ -31,6 +32,7 @@ public final class ConfigProvider extends ContentProvider {
     public boolean onCreate() {
         repository = new WidgetRepository(getContext());
         lyricsProvider = new LyricsStateStore(getContext());
+        qsTileBridge = new QSTileBridgeStore(getContext());
         PlaybackArtworkStore.initialize(getContext());
         initializeTorch();
         return true;
@@ -39,6 +41,24 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
         if ("get_health".equals(method)) return getHealth();
+        if ("publish_qs_tiles".equals(method)) {
+            enforceSystemUiCaller();
+            Bundle result = qsTileBridge.publish(extras);
+            Bundle report = new Bundle();
+            report.putString("stage", "qs");
+            report.putBoolean("ok", true);
+            report.putString("message", "SystemUI QS 桥接已连接");
+            saveHookReport(report);
+            return result;
+        }
+        if ("take_qs_request".equals(method)) {
+            enforceSystemUiCaller();
+            return qsTileBridge.take();
+        }
+        if ("complete_qs_request".equals(method)) {
+            enforceSystemUiCaller();
+            return qsTileBridge.complete(extras);
+        }
         if ("publish_lyrics".equals(method)) {
             enforceNeteaseCaller();
             Bundle result = lyricsProvider.publish(extras);
@@ -65,6 +85,7 @@ public final class ConfigProvider extends ContentProvider {
         if ("list_widgets".equals(method)) return listWidgets();
         if ("get_system_state".equals(method)) return getSystemState();
         if ("get_playback_state".equals(method)) return PlaybackStateStore.provider().snapshot();
+        if ("get_qs_tiles".equals(method)) return qsTileBridge.snapshot();
         if ("get_lyrics_state".equals(method)) {
             return lyricsProvider.snapshot(PlaybackStateStore.provider().snapshot());
         }
@@ -79,7 +100,7 @@ public final class ConfigProvider extends ContentProvider {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
             return Bundle.EMPTY;
         }
-        if ("execute_action".equals(method)) return executeAction(arg);
+        if ("execute_action".equals(method)) return executeAction(arg, extras);
         if ("set_safe_mode".equals(method)) {
             enforceModuleCaller();
             repository.setSafeMode(extras != null && extras.getBoolean("enabled"));
@@ -152,8 +173,11 @@ public final class ConfigProvider extends ContentProvider {
         return null;
     }
 
-    private Bundle executeAction(String action) {
+    private Bundle executeAction(String action, Bundle extras) {
         if (ActionSpec.isMediaControl(action)) return PlaybackStateStore.provider().execute(action);
+        if (ActionSpec.QS_TILE.equals(action)) {
+            return qsTileBridge.request(extras == null ? null : extras.getString("value"));
+        }
         Bundle result = new Bundle();
         if (!ActionSpec.isFlashlight(action)) {
             result.putBoolean("ok", false);
@@ -206,11 +230,17 @@ public final class ConfigProvider extends ContentProvider {
     private Bundle getHealth() {
         SharedPreferences p = prefs();
         Bundle out = new Bundle();
-        for (String stage : new String[]{"compatibility", "catalogue", "runtime", "live_refresh", "lyrics"}) {
+        for (String stage : new String[]{
+                "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs"
+        }) {
             out.putBoolean(stage + "_ok", p.getBoolean("hook_" + stage + "_ok", false));
             out.putString(stage + "_message", p.getString("hook_" + stage + "_message", "尚未收到上报"));
             out.putLong(stage + "_time", p.getLong("hook_" + stage + "_time", 0));
         }
+        Bundle qs = qsTileBridge.snapshot();
+        boolean qsReady = qs.getBoolean("bridge_ready");
+        out.putBoolean("qs_ok", qsReady);
+        if (!qsReady) out.putString("qs_message", "SystemUI QS 桥接未连接或心跳已过期");
         return out;
     }
 
@@ -300,6 +330,17 @@ public final class ConfigProvider extends ContentProvider {
             }
         }
         throw new SecurityException("Only NetEase Cloud Music can publish lyrics");
+    }
+
+    private void enforceSystemUiCaller() {
+        int uid = Binder.getCallingUid();
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        if (packages != null) {
+            for (String name : packages) {
+                if (Contract.SYSTEM_UI_PACKAGE.equals(name)) return;
+            }
+        }
+        throw new SecurityException("Only SystemUI can use the QS bridge mailbox");
     }
 
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) { return null; }

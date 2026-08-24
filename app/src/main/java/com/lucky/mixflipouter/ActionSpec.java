@@ -15,9 +15,11 @@ final class ActionSpec {
     static final String MEDIA_PREVIOUS = "media_previous";
     static final String MEDIA_PLAY_PAUSE = "media_play_pause";
     static final String MEDIA_NEXT = "media_next";
+    static final String QS_TILE = "qs_tile";
 
     static boolean requiresValue(String type) {
-        return LAUNCH_APP.equals(type) || OPEN_URI.equals(type) || SEND_BROADCAST.equals(type);
+        return LAUNCH_APP.equals(type) || OPEN_URI.equals(type)
+                || SEND_BROADCAST.equals(type) || QS_TILE.equals(type);
     }
 
     static boolean isFlashlight(String type) {

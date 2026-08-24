@@ -24,6 +24,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
+        if (Contract.SYSTEM_UI_PACKAGE.equals(param.packageName)) {
+            if (param.processName == null || Contract.SYSTEM_UI_PACKAGE.equals(param.processName)) {
+                SystemUiTileHook.install(param.classLoader);
+            }
+            return;
+        }
         if (Contract.NETEASE_PACKAGE.equals(param.packageName)) {
             if (param.processName == null || Contract.NETEASE_PACKAGE.equals(param.processName)) {
                 NeteaseLyricHook.install(param.classLoader);

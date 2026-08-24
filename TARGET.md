@@ -47,10 +47,11 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 
 | Item | Status |
 |---|---|
-| Research HyperOS SystemUI tile lifecycle and click path | TODO |
-| Discover system and third-party tiles | TODO |
-| Capability matrix and safe adapter | TODO |
-| Editor tile picker and runtime action | TODO |
+| Research HyperOS SystemUI tile lifecycle and click path | DONE |
+| Discover active system tiles and installed third-party TileServices | DONE |
+| Capability matrix, bounded mailbox and caller checks | DONE |
+| Editor tile picker and runtime action | IN PROGRESS |
+| Enable optional SystemUI scope and prove a real tile click | TODO |
 
 ## P4 — Product completeness
 
