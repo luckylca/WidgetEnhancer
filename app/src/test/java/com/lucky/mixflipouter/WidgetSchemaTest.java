@@ -112,4 +112,28 @@ public final class WidgetSchemaTest {
         assertEquals(ActionSpec.VOLUME_UP, config.components.get(0).actionType);
         assertFalse(ActionSpec.requiresValue(ActionSpec.VOLUME_UP));
     }
+
+    @Test
+    public void mediaControlsAreParameterlessAndClassified() {
+        assertTrue(ActionSpec.isMediaControl(ActionSpec.MEDIA_PREVIOUS));
+        assertTrue(ActionSpec.isMediaControl(ActionSpec.MEDIA_PLAY_PAUSE));
+        assertTrue(ActionSpec.isMediaControl(ActionSpec.MEDIA_NEXT));
+        assertFalse(ActionSpec.requiresValue(ActionSpec.MEDIA_PLAY_PAUSE));
+        assertFalse(ActionSpec.isMediaControl(ActionSpec.VOLUME_UP));
+    }
+
+    @Test
+    public void playbackTextComponentsRoundTrip() throws Exception {
+        WidgetComponent title = new WidgetComponent();
+        title.type = WidgetComponent.TYPE_SONG_TITLE;
+        title.content = "暂无播放";
+        WidgetComponent artist = new WidgetComponent();
+        artist.type = WidgetComponent.TYPE_ARTIST;
+        artist.content = "歌手";
+
+        assertEquals(WidgetComponent.TYPE_SONG_TITLE,
+                WidgetComponent.fromJson(title.toJson()).type);
+        assertEquals(WidgetComponent.TYPE_ARTIST,
+                WidgetComponent.fromJson(artist.toJson()).type);
+    }
 }

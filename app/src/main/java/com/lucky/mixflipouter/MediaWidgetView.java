@@ -45,6 +45,7 @@ final class MediaWidgetView extends FrameLayout {
     private final WidgetConfig config;
     private final List<LayerBinding> layerBindings = new ArrayList<>();
     private final List<TimeBinding> timeBindings = new ArrayList<>();
+    private final List<PlaybackBinding> playbackBindings = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private TextureView videoTexture;
     private MediaPlayer mediaPlayer;
@@ -57,6 +58,14 @@ final class MediaWidgetView extends FrameLayout {
             for (TimeBinding binding : timeBindings) updateTime(binding);
             long now = System.currentTimeMillis();
             mainHandler.postDelayed(this, 60_050L - now % 60_000L);
+        }
+    };
+    private final Runnable playbackTicker = new Runnable() {
+        @Override
+        public void run() {
+            if (!runtimeVisible()) return;
+            updatePlaybackBindings();
+            mainHandler.postDelayed(this, 2_000L);
         }
     };
 
@@ -122,13 +131,19 @@ final class MediaWidgetView extends FrameLayout {
             return videoTexture;
         }
         if (WidgetComponent.TYPE_TEXT.equals(component.type)
-                || WidgetComponent.TYPE_TIME.equals(component.type)) {
+                || WidgetComponent.TYPE_TIME.equals(component.type)
+                || WidgetComponent.TYPE_SONG_TITLE.equals(component.type)
+                || WidgetComponent.TYPE_ARTIST.equals(component.type)) {
             TextView text = new TextView(getContext());
             styleText(text, component);
             if (WidgetComponent.TYPE_TIME.equals(component.type)) {
                 TimeBinding binding = new TimeBinding(text, component);
                 timeBindings.add(binding);
                 updateTime(binding);
+            } else if (WidgetComponent.TYPE_SONG_TITLE.equals(component.type)
+                    || WidgetComponent.TYPE_ARTIST.equals(component.type)) {
+                playbackBindings.add(new PlaybackBinding(text, component));
+                text.setText(component.content);
             } else {
                 text.setText(component.content);
             }
@@ -247,8 +262,7 @@ final class MediaWidgetView extends FrameLayout {
     private void maybePlay() {
         MediaPlayer player = mediaPlayer;
         if (player == null || !playerPrepared) return;
-        boolean visible = isAttachedToWindow() && getVisibility() == VISIBLE
-                && getWindowVisibility() == VISIBLE && isShown();
+        boolean visible = runtimeVisible();
         try {
             if (visible) player.start(); else player.pause();
         } catch (IllegalStateException ignored) {
@@ -288,7 +302,7 @@ final class MediaWidgetView extends FrameLayout {
                 adjustMusicVolume(AudioManager.ADJUST_LOWER);
             } else if (ActionSpec.MUTE_TOGGLE.equals(type)) {
                 adjustMusicVolume(AudioManager.ADJUST_TOGGLE_MUTE);
-            } else if (ActionSpec.isFlashlight(type)) {
+            } else if (ActionSpec.isFlashlight(type) || ActionSpec.isMediaControl(type)) {
                 performProviderAction(type);
             } else if (ActionSpec.LOCK_SCREEN.equals(type)) {
                 lockScreen();
@@ -379,6 +393,38 @@ final class MediaWidgetView extends FrameLayout {
         }
     }
 
+    private void updatePlaybackBindings() {
+        if (playbackBindings.isEmpty()) return;
+        try {
+            Bundle state = getContext().getContentResolver().call(
+                    Contract.PROVIDER_URI, "get_playback_state", null, null);
+            boolean available = state != null && state.getBoolean("available");
+            for (PlaybackBinding binding : playbackBindings) {
+                String value;
+                if (!available) {
+                    value = binding.component.content.isEmpty()
+                            ? "暂无播放" : binding.component.content;
+                } else if (WidgetComponent.TYPE_ARTIST.equals(binding.component.type)) {
+                    value = state.getString("artist", "");
+                } else {
+                    value = state.getString("title", "");
+                }
+                binding.view.setText(value == null || value.isEmpty() ? "暂无信息" : value);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private boolean runtimeVisible() {
+        return isAttachedToWindow() && getVisibility() == VISIBLE
+                && getWindowVisibility() == VISIBLE && isShown();
+    }
+
+    private void updatePlaybackSchedule() {
+        mainHandler.removeCallbacks(playbackTicker);
+        if (!playbackBindings.isEmpty() && runtimeVisible()) playbackTicker.run();
+    }
+
     private static int parseColor(String value, int fallback) {
         try {
             return Color.parseColor(value);
@@ -448,6 +494,7 @@ final class MediaWidgetView extends FrameLayout {
             mainHandler.removeCallbacks(timeTicker);
             timeTicker.run();
         }
+        updatePlaybackSchedule();
         if (videoTexture != null && videoTexture.isAvailable() && mediaPlayer == null) {
             createPlayer(videoTexture.getSurfaceTexture());
         } else {
@@ -458,6 +505,7 @@ final class MediaWidgetView extends FrameLayout {
     @Override
     protected void onDetachedFromWindow() {
         mainHandler.removeCallbacks(timeTicker);
+        mainHandler.removeCallbacks(playbackTicker);
         releasePlayer();
         super.onDetachedFromWindow();
     }
@@ -473,12 +521,14 @@ final class MediaWidgetView extends FrameLayout {
     protected void onVisibilityChanged(View changedView, int visibility) {
         super.onVisibilityChanged(changedView, visibility);
         maybePlay();
+        updatePlaybackSchedule();
     }
 
     @Override
     protected void onWindowVisibilityChanged(int visibility) {
         super.onWindowVisibilityChanged(visibility);
         maybePlay();
+        updatePlaybackSchedule();
     }
 
     private int dp(int value) {
@@ -500,6 +550,16 @@ final class MediaWidgetView extends FrameLayout {
         final WidgetComponent component;
 
         TimeBinding(TextView view, WidgetComponent component) {
+            this.view = view;
+            this.component = component;
+        }
+    }
+
+    private static final class PlaybackBinding {
+        final TextView view;
+        final WidgetComponent component;
+
+        PlaybackBinding(TextView view, WidgetComponent component) {
             this.view = view;
             this.component = component;
         }

@@ -59,8 +59,10 @@ final class LiveRefreshBridge {
         try {
             reconcileSelectedWidgets(loader);
             refreshOpenSettings();
+            report("live_refresh", true, "配置已即时刷新");
             XposedBridge.log("MixFlipCustom: live configuration refresh completed");
         } catch (Throwable error) {
+            report("live_refresh", false, "即时刷新失败：" + error.getClass().getSimpleName());
             XposedBridge.log("MixFlipCustom: live refresh failed: " + error);
         }
     }

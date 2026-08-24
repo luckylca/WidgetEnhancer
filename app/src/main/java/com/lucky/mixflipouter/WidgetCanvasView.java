@@ -178,6 +178,10 @@ final class WidgetCanvasView extends View {
                 } catch (IllegalArgumentException ignored) {
                     value = new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date());
                 }
+            } else if (WidgetComponent.TYPE_SONG_TITLE.equals(component.type)) {
+                value = value.isEmpty() ? "歌曲名称" : value;
+            } else if (WidgetComponent.TYPE_ARTIST.equals(component.type)) {
+                value = value.isEmpty() ? "歌手" : value;
             }
             drawText(canvas, rect, component, value.isEmpty() ? "文本" : value);
         }

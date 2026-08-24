@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-24 08:51 CST
+Last updated: 2026-08-24 09:06 CST
 
 ## DONE
 
@@ -39,12 +39,17 @@ Last updated: 2026-08-24 08:51 CST
 - Granted Camera through the standard Android permission flow and verified the auto-restoring flashlight diagnostic in CameraService: camera 0 turned on at 08:55:17 and off at 08:55:18.
 - Verified the launchable-app picker on-device with icons, localized labels, package names and scrolling.
 - Observed a saved user composition containing image + resized time + resized TikTok button; FlipHome reloaded both custom Widget hosts on schema v2 without a crash. Pixel proof remains gated by the secure cover lock screen.
+- Added a player-agnostic `PlaybackProvider` contract backed by a user-approved notification listener and MediaSession controller selection.
+- Added song/artist canvas components plus previous, play/pause and next actions; runtime playback polling stops whenever the Widget is hidden or detached.
+- Exposed media notification-access status in the configuration App without silently granting privileged access.
+- Upgraded live-refresh health reporting to record actual refresh success/failure instead of only observer registration.
 
 ## IN PROGRESS
 
 - P1: finish exact canvas property UX and prove saved text/time/button components on the unlocked cover runtime.
 - P1: verify volume, lock and flashlight actions from the real cover page.
 - P1: finish the gallery read-grant regression after the secure cover display is unlocked.
+- P2: enable and device-test the MediaSession bridge with NetEase Cloud Music, then add album art, progress and the separate lyrics provider.
 
 ## FAILED
 
@@ -62,4 +67,5 @@ Last updated: 2026-08-24 08:51 CST
 2. Verify gallery open/read, volume and lock actions on the cover page.
 3. Complete repeated official ↔ custom ↔ official swipe regression.
 4. Finish component property polish and remove the remaining legacy fixed-button editor projection.
-5. Begin the MediaSession/lyrics provider layer after P1 device gates pass.
+5. Enable the media notification listener manually and verify NetEase metadata and transport controls.
+6. Implement album art/progress components and begin the separate NetEase lyrics provider.

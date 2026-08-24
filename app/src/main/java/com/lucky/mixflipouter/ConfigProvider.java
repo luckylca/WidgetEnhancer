@@ -42,6 +42,7 @@ public final class ConfigProvider extends ContentProvider {
         }
         if ("list_widgets".equals(method)) return listWidgets();
         if ("get_system_state".equals(method)) return getSystemState();
+        if ("get_playback_state".equals(method)) return PlaybackStateStore.provider().snapshot();
         if ("grant_media".equals(method)) {
             String packageName = extras == null ? null : extras.getString("package");
             if (!Contract.GALLERY_PACKAGE.equals(packageName)) {
@@ -127,6 +128,7 @@ public final class ConfigProvider extends ContentProvider {
     }
 
     private Bundle executeAction(String action) {
+        if (ActionSpec.isMediaControl(action)) return PlaybackStateStore.provider().execute(action);
         Bundle result = new Bundle();
         if (!ActionSpec.isFlashlight(action)) {
             result.putBoolean("ok", false);

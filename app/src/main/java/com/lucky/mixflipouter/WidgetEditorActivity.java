@@ -34,13 +34,15 @@ public final class WidgetEditorActivity extends Activity {
     private static final String[] TYPE_LABELS = {
             "启动应用", "打开 URI", "发送广播",
             "音量＋", "音量－", "静音切换",
-            "打开手电筒", "关闭手电筒", "切换手电筒", "锁屏"
+            "打开手电筒", "关闭手电筒", "切换手电筒", "锁屏",
+            "上一曲", "播放 / 暂停", "下一曲"
     };
     private static final String[] TYPE_VALUES = {
             ActionSpec.LAUNCH_APP, ActionSpec.OPEN_URI, ActionSpec.SEND_BROADCAST,
             ActionSpec.VOLUME_UP, ActionSpec.VOLUME_DOWN, ActionSpec.MUTE_TOGGLE,
             ActionSpec.FLASHLIGHT_ON, ActionSpec.FLASHLIGHT_OFF,
-            ActionSpec.FLASHLIGHT_TOGGLE, ActionSpec.LOCK_SCREEN
+            ActionSpec.FLASHLIGHT_TOGGLE, ActionSpec.LOCK_SCREEN,
+            ActionSpec.MEDIA_PREVIOUS, ActionSpec.MEDIA_PLAY_PAUSE, ActionSpec.MEDIA_NEXT
     };
 
     private WidgetRepository repository;
@@ -120,6 +122,12 @@ public final class WidgetEditorActivity extends Activity {
         addComponents.addView(button("＋时间", v -> addTimeComponent()), weighted());
         addComponents.addView(button("＋按钮", v -> addButtonComponent()), weighted());
         root.addView(addComponents, matchWrap());
+        LinearLayout mediaComponents = horizontal();
+        mediaComponents.addView(button("＋歌曲", v -> addPlaybackTextComponent(
+                WidgetComponent.TYPE_SONG_TITLE, "歌曲名称", 40, 220, 360, 72, 36)), weighted());
+        mediaComponents.addView(button("＋歌手", v -> addPlaybackTextComponent(
+                WidgetComponent.TYPE_ARTIST, "歌手", 40, 292, 360, 60, 26)), weighted());
+        root.addView(mediaComponents, matchWrap());
 
         LinearLayout editComponents = horizontal();
         editComponents.addView(button("属性", v -> editSelectedComponent()), weighted());
@@ -348,6 +356,19 @@ public final class WidgetEditorActivity extends Activity {
         canvasView.addComponent(component);
     }
 
+    private void addPlaybackTextComponent(String type, String placeholder,
+                                          float x, float y, float width, float height, float textSize) {
+        WidgetComponent component = new WidgetComponent();
+        component.type = type;
+        component.content = placeholder;
+        component.x = x;
+        component.y = y;
+        component.width = width;
+        component.height = height;
+        component.textSize = textSize;
+        canvasView.addComponent(component);
+    }
+
     private void addButtonComponent() {
         if (buttonComponents().size() >= Contract.BUTTON_COUNT) {
             Toast.makeText(this, "第一版最多支持 4 个按钮", Toast.LENGTH_SHORT).show();
@@ -484,6 +505,8 @@ public final class WidgetEditorActivity extends Activity {
         if (WidgetComponent.TYPE_VIDEO.equals(type)) return "视频";
         if (WidgetComponent.TYPE_TIME.equals(type)) return "时间";
         if (WidgetComponent.TYPE_BUTTON.equals(type)) return "按钮";
+        if (WidgetComponent.TYPE_SONG_TITLE.equals(type)) return "歌曲名称";
+        if (WidgetComponent.TYPE_ARTIST.equals(type)) return "歌手";
         return "文本";
     }
 

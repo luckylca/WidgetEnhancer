@@ -41,6 +41,7 @@ public final class SettingsActivity extends Activity {
     private MaterialSwitch safeModeSwitch;
     private MaterialButton torchPermission;
     private MaterialButton torchTest;
+    private MaterialButton mediaAccess;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -55,6 +56,7 @@ public final class SettingsActivity extends Activity {
         renderWidgets();
         updateHookStatus();
         updateTorchPermission();
+        updateMediaAccess();
     }
 
     private View createContent() {
@@ -145,6 +147,9 @@ public final class SettingsActivity extends Activity {
         body.addView(torchPermission, matchWrap());
         torchTest = outlinedButton("测试手电筒（自动恢复）", v -> testTorch());
         body.addView(torchTest, matchWrap());
+        mediaAccess = outlinedButton("授予媒体通知访问", v -> startActivity(
+                new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        body.addView(mediaAccess, matchWrap());
 
         LinearLayout actions = horizontal();
         MaterialButton official = outlinedButton("打开系统小部件", v -> openOfficialWidgets());
@@ -188,6 +193,16 @@ public final class SettingsActivity extends Activity {
         } catch (Throwable error) {
             Toast.makeText(this, "手电筒测试失败：" + error.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void updateMediaAccess() {
+        if (mediaAccess == null) return;
+        String enabled = Settings.Secure.getString(
+                getContentResolver(), "enabled_notification_listeners");
+        String component = new ComponentName(this, PlaybackNotificationListener.class)
+                .flattenToString();
+        boolean granted = enabled != null && enabled.contains(component);
+        mediaAccess.setText(granted ? "✓ 媒体会话访问已就绪" : "授予媒体通知访问");
     }
 
     @Override

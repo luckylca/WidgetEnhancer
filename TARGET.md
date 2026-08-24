@@ -36,12 +36,12 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 
 | Item | Status |
 |---|---|
-| PlaybackProvider abstraction | TODO |
-| MediaSession metadata and transport controls | TODO |
+| PlaybackProvider abstraction | IN PROGRESS |
+| MediaSession metadata and transport controls | IN PROGRESS |
 | LyricsProvider abstraction | TODO |
 | NetEase Cloud Music lyric research and adapter | TODO |
 | Synced current/next lyric components | TODO |
-| Album art, song, artist and playback components | TODO |
+| Album art, song, artist and playback components | IN PROGRESS |
 
 ## P3 — Quick Settings bridge
 

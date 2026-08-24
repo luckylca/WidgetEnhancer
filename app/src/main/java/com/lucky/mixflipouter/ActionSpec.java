@@ -12,6 +12,9 @@ final class ActionSpec {
     static final String FLASHLIGHT_OFF = "flashlight_off";
     static final String FLASHLIGHT_TOGGLE = "flashlight_toggle";
     static final String LOCK_SCREEN = "lock_screen";
+    static final String MEDIA_PREVIOUS = "media_previous";
+    static final String MEDIA_PLAY_PAUSE = "media_play_pause";
+    static final String MEDIA_NEXT = "media_next";
 
     static boolean requiresValue(String type) {
         return LAUNCH_APP.equals(type) || OPEN_URI.equals(type) || SEND_BROADCAST.equals(type);
@@ -21,6 +24,12 @@ final class ActionSpec {
         return FLASHLIGHT_ON.equals(type)
                 || FLASHLIGHT_OFF.equals(type)
                 || FLASHLIGHT_TOGGLE.equals(type);
+    }
+
+    static boolean isMediaControl(String type) {
+        return MEDIA_PREVIOUS.equals(type)
+                || MEDIA_PLAY_PAUSE.equals(type)
+                || MEDIA_NEXT.equals(type);
     }
 
     private ActionSpec() {}
