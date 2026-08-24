@@ -158,6 +158,12 @@ final class WidgetCanvasView extends View {
         if (WidgetComponent.TYPE_IMAGE.equals(component.type)
                 || WidgetComponent.TYPE_VIDEO.equals(component.type)) {
             drawMedia(canvas, rect, component);
+        } else if (WidgetComponent.TYPE_ALBUM_ART.equals(component.type)) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFF303030);
+            canvas.drawRoundRect(rect, scaled(component.cornerRadius),
+                    scaled(component.cornerRadius), paint);
+            drawText(canvas, rect, component, "专辑封面");
         } else if (WidgetComponent.TYPE_BUTTON.equals(component.type)) {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(0xCC252525);
@@ -169,6 +175,17 @@ final class WidgetCanvasView extends View {
             canvas.drawRoundRect(rect, scaled(component.cornerRadius),
                     scaled(component.cornerRadius), paint);
             drawText(canvas, rect, component, component.content.isEmpty() ? "按钮" : component.content);
+        } else if (WidgetComponent.TYPE_PLAYBACK_PROGRESS.equals(component.type)) {
+            float barHeight = Math.min(rect.height(), dp(5));
+            RectF track = new RectF(rect.left, rect.centerY() - barHeight / 2,
+                    rect.right, rect.centerY() + barHeight / 2);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0x55FFFFFF);
+            canvas.drawRoundRect(track, barHeight / 2, barHeight / 2, paint);
+            paint.setColor(parseColor(component.color, Color.WHITE));
+            RectF progress = new RectF(track.left, track.top,
+                    track.left + track.width() * 0.38f, track.bottom);
+            canvas.drawRoundRect(progress, barHeight / 2, barHeight / 2, paint);
         } else {
             String value = component.content;
             if (WidgetComponent.TYPE_TIME.equals(component.type)) {

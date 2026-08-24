@@ -16,6 +16,8 @@ The active-session selector prefers a session in `STATE_PLAYING`, then falls bac
 
 Runtime polling runs every two seconds only while a song or artist component is attached and visible. Hiding or detaching the Widget cancels polling. Previous, play/pause and next are semantic button actions routed through `MediaController.TransportControls`.
 
+When a progress component is present, the same visible-only ticker runs every 500 ms and draws the estimated MediaSession position against duration. Album artwork is copied from MediaSession metadata into a module-private JPEG on a single background worker. FlipHome receives only a guarded read-only content URI; it never reads another player's private file or downloads artwork itself.
+
 Notification access is never enabled silently. The configuration App links to Android's notification-listener settings and displays whether the user-approved listener is active.
 
 ## Provider boundaries
@@ -46,4 +48,4 @@ The LSPosed scope remains mandatory for FlipHome. NetEase Cloud Music is an addi
 - Verify session switching and no-session fallback.
 - Device-verify the 9.5.61 model callback after enabling the optional NetEase scope.
 - Verify current/next-line synchronization and user lyric-offset semantics with real playback.
-- Add album-art, playback-state and progress components.
+- Device-verify album artwork and progress after MediaSession access is enabled.

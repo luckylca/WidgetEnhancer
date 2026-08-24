@@ -14,9 +14,18 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
             PlaybackStateStore::updateSessions;
 
     @Override
+    public void onCreate() {
+        super.onCreate();
+        PlaybackArtworkStore.initialize(this);
+    }
+
+    @Override
     public void onListenerConnected() {
         super.onListenerConnected();
         try {
+            if (sessionManager != null) {
+                try { sessionManager.removeOnActiveSessionsChangedListener(listener); } catch (Throwable ignored) {}
+            }
             sessionManager = (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
             ComponentName component = new ComponentName(this, PlaybackNotificationListener.class);
             sessionManager.addOnActiveSessionsChangedListener(listener, component);
@@ -29,6 +38,9 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
 
     @Override
     public void onListenerDisconnected() {
+        if (sessionManager != null) {
+            try { sessionManager.removeOnActiveSessionsChangedListener(listener); } catch (Throwable ignored) {}
+        }
         PlaybackStateStore.clear();
         super.onListenerDisconnected();
     }

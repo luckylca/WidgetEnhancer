@@ -63,6 +63,8 @@ final class PlaybackStateStore implements PlaybackProvider {
             out.putLong("duration", value.duration);
             out.putFloat("speed", value.speed);
             out.putLong("updated_elapsed", value.updatedElapsed);
+            out.putBoolean("artwork_available", PlaybackArtworkStore.available());
+            out.putLong("artwork_revision", PlaybackArtworkStore.revision());
             return out;
         }
     }
@@ -115,6 +117,7 @@ final class PlaybackStateStore implements PlaybackProvider {
             next.available = true;
             next.packageName = safe(controller.getPackageName());
             MediaMetadata metadata = controller.getMetadata();
+            PlaybackArtworkStore.update(metadata);
             if (metadata != null) {
                 next.title = first(metadata,
                         MediaMetadata.METADATA_KEY_TITLE, MediaMetadata.METADATA_KEY_DISPLAY_TITLE);

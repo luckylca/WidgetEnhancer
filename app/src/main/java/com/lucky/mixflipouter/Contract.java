@@ -10,6 +10,7 @@ final class Contract {
     static final String AUTHORITY = "com.lucky.mixflipouter.provider";
     static final Uri PROVIDER_URI = Uri.parse("content://" + AUTHORITY);
     static final Uri LYRICS_URI = Uri.parse("content://" + AUTHORITY + "/lyrics");
+    static final Uri PLAYBACK_ARTWORK_URI = Uri.parse("content://" + AUTHORITY + "/playback/artwork");
     static final String CUSTOM_TYPE = "mixflip_custom";
     static final String WIDGET_FILE_PREFIX = "mixflip_custom_widget_";
     static final String DEFAULT_WIDGET_ID = "default";

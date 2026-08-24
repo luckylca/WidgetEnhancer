@@ -11,6 +11,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Outline;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
@@ -46,6 +48,8 @@ final class MediaWidgetView extends FrameLayout {
     private final List<LayerBinding> layerBindings = new ArrayList<>();
     private final List<TimeBinding> timeBindings = new ArrayList<>();
     private final List<PlaybackBinding> playbackBindings = new ArrayList<>();
+    private final List<ProgressBinding> progressBindings = new ArrayList<>();
+    private final List<AlbumBinding> albumBindings = new ArrayList<>();
     private final List<PlaybackBinding> lyricBindings = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private TextureView videoTexture;
@@ -66,7 +70,7 @@ final class MediaWidgetView extends FrameLayout {
         public void run() {
             if (!runtimeVisible()) return;
             updatePlaybackBindings();
-            mainHandler.postDelayed(this, 2_000L);
+            mainHandler.postDelayed(this, progressBindings.isEmpty() ? 2_000L : 500L);
         }
     };
     private final Runnable lyricTicker = new Runnable() {
@@ -103,6 +107,13 @@ final class MediaWidgetView extends FrameLayout {
     }
 
     private View createLayer(WidgetComponent component) {
+        if (WidgetComponent.TYPE_ALBUM_ART.equals(component.type)) {
+            ImageView artwork = new ImageView(getContext());
+            artwork.setScaleType(imageScaleType(component.fillMode));
+            artwork.setBackgroundColor(0xFF303030);
+            albumBindings.add(new AlbumBinding(artwork));
+            return artwork;
+        }
         if (WidgetComponent.TYPE_IMAGE.equals(component.type)) {
             ImageView image = new ImageView(getContext());
             image.setScaleType(imageScaleType(component.fillMode));
@@ -138,6 +149,11 @@ final class MediaWidgetView extends FrameLayout {
                 }
             });
             return videoTexture;
+        }
+        if (WidgetComponent.TYPE_PLAYBACK_PROGRESS.equals(component.type)) {
+            PlaybackProgressView progress = new PlaybackProgressView(getContext(), component);
+            progressBindings.add(new ProgressBinding(progress));
+            return progress;
         }
         if (WidgetComponent.TYPE_TEXT.equals(component.type)
                 || WidgetComponent.TYPE_TIME.equals(component.type)
@@ -409,7 +425,7 @@ final class MediaWidgetView extends FrameLayout {
     }
 
     private void updatePlaybackBindings() {
-        if (playbackBindings.isEmpty()) return;
+        if (playbackBindings.isEmpty() && progressBindings.isEmpty() && albumBindings.isEmpty()) return;
         try {
             Bundle state = getContext().getContentResolver().call(
                     Contract.PROVIDER_URI, "get_playback_state", null, null);
@@ -426,8 +442,35 @@ final class MediaWidgetView extends FrameLayout {
                 }
                 binding.view.setText(value == null || value.isEmpty() ? "暂无信息" : value);
             }
+            long duration = available ? state.getLong("duration", 0) : 0;
+            long position = available ? state.getLong("position", 0) : 0;
+            float fraction = duration > 0
+                    ? Math.max(0f, Math.min(1f, position / (float) duration)) : 0f;
+            for (ProgressBinding binding : progressBindings) binding.view.setProgress(fraction);
+            boolean artworkAvailable = available && state.getBoolean("artwork_available");
+            long artworkRevision = artworkAvailable ? state.getLong("artwork_revision", 0) : 0;
+            for (AlbumBinding binding : albumBindings) {
+                if (!artworkAvailable) {
+                    binding.requestedRevision = 0;
+                    binding.view.setImageDrawable(null);
+                } else if (artworkRevision > 0 && binding.requestedRevision != artworkRevision) {
+                    loadArtwork(binding, artworkRevision);
+                }
+            }
         } catch (Throwable ignored) {
         }
+    }
+
+    private void loadArtwork(AlbumBinding binding, long revision) {
+        binding.requestedRevision = revision;
+        int width = Math.max(256, binding.view.getWidth());
+        int height = Math.max(256, binding.view.getHeight());
+        new Thread(() -> {
+            Bitmap bitmap = loadBitmap(Contract.PLAYBACK_ARTWORK_URI, width, height);
+            binding.view.post(() -> {
+                if (binding.requestedRevision == revision) binding.view.setImageBitmap(bitmap);
+            });
+        }, "mixflip-artwork-load").start();
     }
 
     private void updateLyricBindings() {
@@ -464,7 +507,10 @@ final class MediaWidgetView extends FrameLayout {
 
     private void updatePlaybackSchedule() {
         mainHandler.removeCallbacks(playbackTicker);
-        if (!playbackBindings.isEmpty() && runtimeVisible()) playbackTicker.run();
+        if ((!playbackBindings.isEmpty() || !progressBindings.isEmpty() || !albumBindings.isEmpty())
+                && runtimeVisible()) {
+            playbackTicker.run();
+        }
     }
 
     private void updateLyricSchedule() {
@@ -516,17 +562,21 @@ final class MediaWidgetView extends FrameLayout {
     }
 
     private Bitmap loadScaledBitmap(int targetWidth, int targetHeight) {
+        return loadBitmap(Contract.mediaUri(config.id), targetWidth, targetHeight);
+    }
+
+    private Bitmap loadBitmap(Uri uri, int targetWidth, int targetHeight) {
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
-            try (InputStream in = getContext().getContentResolver().openInputStream(Contract.mediaUri(config.id))) {
+            try (InputStream in = getContext().getContentResolver().openInputStream(uri)) {
                 BitmapFactory.decodeStream(in, null, bounds);
             }
             int sample = 1;
             while (bounds.outWidth / sample > targetWidth * 2 || bounds.outHeight / sample > targetHeight * 2) sample *= 2;
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = sample;
-            try (InputStream in = getContext().getContentResolver().openInputStream(Contract.mediaUri(config.id))) {
+            try (InputStream in = getContext().getContentResolver().openInputStream(uri)) {
                 return BitmapFactory.decodeStream(in, null, options);
             }
         } catch (Throwable error) {
@@ -613,6 +663,53 @@ final class MediaWidgetView extends FrameLayout {
         PlaybackBinding(TextView view, WidgetComponent component) {
             this.view = view;
             this.component = component;
+        }
+    }
+
+    private static final class ProgressBinding {
+        final PlaybackProgressView view;
+
+        ProgressBinding(PlaybackProgressView view) {
+            this.view = view;
+        }
+    }
+
+    private static final class AlbumBinding {
+        final ImageView view;
+        volatile long requestedRevision = -1;
+
+        AlbumBinding(ImageView view) {
+            this.view = view;
+        }
+    }
+
+    private static final class PlaybackProgressView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int progressColor;
+        private float progress;
+
+        PlaybackProgressView(Context context, WidgetComponent component) {
+            super(context);
+            progressColor = parseColor(component.color, Color.WHITE);
+        }
+
+        void setProgress(float value) {
+            progress = Math.max(0f, Math.min(1f, value));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            float barHeight = Math.min(getHeight(),
+                    5f * getResources().getDisplayMetrics().density);
+            float top = (getHeight() - barHeight) / 2f;
+            RectF track = new RectF(0, top, getWidth(), top + barHeight);
+            paint.setColor(0x55FFFFFF);
+            canvas.drawRoundRect(track, barHeight / 2f, barHeight / 2f, paint);
+            paint.setColor(progressColor);
+            RectF fill = new RectF(0, top, getWidth() * progress, top + barHeight);
+            canvas.drawRoundRect(fill, barHeight / 2f, barHeight / 2f, paint);
         }
     }
 }

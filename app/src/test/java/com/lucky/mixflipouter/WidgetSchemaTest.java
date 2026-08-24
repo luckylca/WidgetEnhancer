@@ -170,4 +170,26 @@ public final class WidgetSchemaTest {
         assertEquals(WidgetComponent.TYPE_LYRIC_NEXT,
                 WidgetComponent.fromJson(next.toJson()).type);
     }
+
+    @Test
+    public void playbackProgressComponentRoundTrips() throws Exception {
+        WidgetComponent progress = new WidgetComponent();
+        progress.type = WidgetComponent.TYPE_PLAYBACK_PROGRESS;
+        progress.width = 360;
+        progress.height = 30;
+
+        WidgetComponent restored = WidgetComponent.fromJson(progress.toJson());
+        assertEquals(WidgetComponent.TYPE_PLAYBACK_PROGRESS, restored.type);
+        assertEquals(360f, restored.width, 0.001f);
+    }
+
+    @Test
+    public void albumArtComponentRoundTrips() throws Exception {
+        WidgetComponent artwork = new WidgetComponent();
+        artwork.type = WidgetComponent.TYPE_ALBUM_ART;
+        artwork.cornerRadius = 20;
+        WidgetComponent restored = WidgetComponent.fromJson(artwork.toJson());
+        assertEquals(WidgetComponent.TYPE_ALBUM_ART, restored.type);
+        assertEquals(20f, restored.cornerRadius, 0.001f);
+    }
 }

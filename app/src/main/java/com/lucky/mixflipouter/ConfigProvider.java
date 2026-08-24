@@ -31,6 +31,7 @@ public final class ConfigProvider extends ContentProvider {
     public boolean onCreate() {
         repository = new WidgetRepository(getContext());
         lyricsProvider = new LyricsStateStore(getContext());
+        PlaybackArtworkStore.initialize(getContext());
         initializeTorch();
         return true;
     }
@@ -217,6 +218,11 @@ public final class ConfigProvider extends ContentProvider {
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         enforceMediaReader(uri);
         if (!"r".equals(mode)) throw new FileNotFoundException("Read only");
+        if (Contract.PLAYBACK_ARTWORK_URI.equals(uri)) {
+            File artwork = PlaybackArtworkStore.file(getContext());
+            if (artwork.isFile()) return readOnly(artwork);
+            throw new FileNotFoundException("No playback artwork");
+        }
         String kind = lastSegment(uri);
         String widgetId = widgetId(uri);
         WidgetConfig config = repository.get(widgetId);
@@ -233,6 +239,7 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public String getType(Uri uri) {
         enforceMediaReader(uri);
+        if (Contract.PLAYBACK_ARTWORK_URI.equals(uri)) return "image/jpeg";
         WidgetConfig config = repository.get(widgetId(uri));
         if (config == null) return "application/octet-stream";
         if ("preview".equals(lastSegment(uri))) return "image/png";

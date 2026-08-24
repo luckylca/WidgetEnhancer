@@ -128,6 +128,10 @@ public final class WidgetEditorActivity extends Activity {
         mediaComponents.addView(button("＋歌手", v -> addPlaybackTextComponent(
                 WidgetComponent.TYPE_ARTIST, "歌手", 40, 292, 360, 60, 26)), weighted());
         root.addView(mediaComponents, matchWrap());
+        LinearLayout playbackVisuals = horizontal();
+        playbackVisuals.addView(button("＋封面", v -> addAlbumArtComponent()), weighted());
+        playbackVisuals.addView(button("＋进度", v -> addPlaybackProgressComponent()), weighted());
+        root.addView(playbackVisuals, matchWrap());
         LinearLayout lyricComponents = horizontal();
         lyricComponents.addView(button("＋歌词", v -> addPlaybackTextComponent(
                 WidgetComponent.TYPE_LYRIC_CURRENT, "当前歌词", 28, 370, 384, 76, 30)), weighted());
@@ -375,6 +379,29 @@ public final class WidgetEditorActivity extends Activity {
         canvasView.addComponent(component);
     }
 
+    private void addPlaybackProgressComponent() {
+        WidgetComponent component = new WidgetComponent();
+        component.type = WidgetComponent.TYPE_PLAYBACK_PROGRESS;
+        component.x = 40;
+        component.y = 530;
+        component.width = 360;
+        component.height = 30;
+        component.color = "#FFFFFFFF";
+        canvasView.addComponent(component);
+    }
+
+    private void addAlbumArtComponent() {
+        WidgetComponent component = new WidgetComponent();
+        component.type = WidgetComponent.TYPE_ALBUM_ART;
+        component.x = 28;
+        component.y = 190;
+        component.width = 150;
+        component.height = 150;
+        component.cornerRadius = 20;
+        component.fillMode = "cover";
+        canvasView.addComponent(component);
+    }
+
     private void addButtonComponent() {
         if (buttonComponents().size() >= Contract.BUTTON_COUNT) {
             Toast.makeText(this, "第一版最多支持 4 个按钮", Toast.LENGTH_SHORT).show();
@@ -515,6 +542,8 @@ public final class WidgetEditorActivity extends Activity {
         if (WidgetComponent.TYPE_ARTIST.equals(type)) return "歌手";
         if (WidgetComponent.TYPE_LYRIC_CURRENT.equals(type)) return "当前歌词";
         if (WidgetComponent.TYPE_LYRIC_NEXT.equals(type)) return "下一句歌词";
+        if (WidgetComponent.TYPE_PLAYBACK_PROGRESS.equals(type)) return "播放进度";
+        if (WidgetComponent.TYPE_ALBUM_ART.equals(type)) return "专辑封面";
         return "文本";
     }
 

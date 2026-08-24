@@ -15,6 +15,8 @@ final class WidgetComponent {
     static final String TYPE_ARTIST = "artist";
     static final String TYPE_LYRIC_CURRENT = "lyric_current";
     static final String TYPE_LYRIC_NEXT = "lyric_next";
+    static final String TYPE_PLAYBACK_PROGRESS = "playback_progress";
+    static final String TYPE_ALBUM_ART = "album_art";
 
     String id = UUID.randomUUID().toString();
     String type = TYPE_TEXT;

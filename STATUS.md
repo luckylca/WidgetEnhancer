@@ -47,6 +47,7 @@ Last updated: 2026-08-24 09:22 CST
 - Added a guarded, optional NetEase LSPosed adapter that publishes sanitized original/translated/romanized lyric lines without scraping UI text.
 - Added a generic `LyricsProvider`, persisted lyric schema, binary-search timeline resolution, current/next lyric canvas components and visibility-aware 500 ms runtime updates.
 - Bumped the development APK to 0.5.0-p1 (versionCode 6) because synchronized lyrics add an optional `com.netease.cloudmusic` LSPosed scope.
+- Added editable album-art and playback-progress components. Artwork is asynchronously copied from MediaSession metadata into guarded module storage; progress uses visible-only 500 ms position estimation.
 
 ## IN PROGRESS
 
