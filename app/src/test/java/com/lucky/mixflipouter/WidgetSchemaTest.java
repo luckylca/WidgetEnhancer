@@ -8,6 +8,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.util.ArrayList;
+
 public final class WidgetSchemaTest {
     @Test
     public void componentRoundTripPreservesGeometryStyleAndAction() throws Exception {
@@ -135,5 +137,37 @@ public final class WidgetSchemaTest {
                 WidgetComponent.fromJson(title.toJson()).type);
         assertEquals(WidgetComponent.TYPE_ARTIST,
                 WidgetComponent.fromJson(artist.toJson()).type);
+    }
+
+    @Test
+    public void lyricTimelineResolvesCurrentAndUpcomingLines() {
+        ArrayList<LyricsStateStore.Line> lines = new ArrayList<>();
+        LyricsStateStore.Line first = new LyricsStateStore.Line();
+        first.start = 1_000;
+        LyricsStateStore.Line second = new LyricsStateStore.Line();
+        second.start = 3_500;
+        LyricsStateStore.Line third = new LyricsStateStore.Line();
+        third.start = 8_000;
+        lines.add(first);
+        lines.add(second);
+        lines.add(third);
+
+        assertEquals(-1, LyricsStateStore.findLine(lines, 999));
+        assertEquals(0, LyricsStateStore.findLine(lines, 1_000));
+        assertEquals(1, LyricsStateStore.findLine(lines, 7_999));
+        assertEquals(2, LyricsStateStore.findLine(lines, 12_000));
+    }
+
+    @Test
+    public void lyricComponentsRoundTripWithoutSchemaMigration() throws Exception {
+        WidgetComponent current = new WidgetComponent();
+        current.type = WidgetComponent.TYPE_LYRIC_CURRENT;
+        WidgetComponent next = new WidgetComponent();
+        next.type = WidgetComponent.TYPE_LYRIC_NEXT;
+
+        assertEquals(WidgetComponent.TYPE_LYRIC_CURRENT,
+                WidgetComponent.fromJson(current.toJson()).type);
+        assertEquals(WidgetComponent.TYPE_LYRIC_NEXT,
+                WidgetComponent.fromJson(next.toJson()).type);
     }
 }

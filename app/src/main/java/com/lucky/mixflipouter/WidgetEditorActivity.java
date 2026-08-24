@@ -128,6 +128,12 @@ public final class WidgetEditorActivity extends Activity {
         mediaComponents.addView(button("＋歌手", v -> addPlaybackTextComponent(
                 WidgetComponent.TYPE_ARTIST, "歌手", 40, 292, 360, 60, 26)), weighted());
         root.addView(mediaComponents, matchWrap());
+        LinearLayout lyricComponents = horizontal();
+        lyricComponents.addView(button("＋歌词", v -> addPlaybackTextComponent(
+                WidgetComponent.TYPE_LYRIC_CURRENT, "当前歌词", 28, 370, 384, 76, 30)), weighted());
+        lyricComponents.addView(button("＋下一句", v -> addPlaybackTextComponent(
+                WidgetComponent.TYPE_LYRIC_NEXT, "下一句歌词", 28, 446, 384, 66, 23)), weighted());
+        root.addView(lyricComponents, matchWrap());
 
         LinearLayout editComponents = horizontal();
         editComponents.addView(button("属性", v -> editSelectedComponent()), weighted());
@@ -178,7 +184,7 @@ public final class WidgetEditorActivity extends Activity {
         MaterialButton moduleSettings = button("打开 LSPosed 模块设置", v -> openLsposed());
         root.addView(moduleSettings, matchWrap());
 
-        TextView footer = text("首次使用：在 LSPosed 中启用本模块，作用域只勾选“外屏桌面 / com.miui.fliphome”，然后重启手机。更新媒体后，重新开合一次外屏；若未刷新，再重启外屏桌面或手机。", 13, 0xFF666666);
+        TextView footer = text("首次使用：在 LSPosed 中启用本模块，外屏桌面 / com.miui.fliphome 为必选作用域；如需网易云同步歌词，再额外勾选 com.netease.cloudmusic。更新媒体后会尝试即时刷新。", 13, 0xFF666666);
         footer.setPadding(0, dp(16), 0, 0);
         root.addView(footer);
         return scroll;
@@ -507,6 +513,8 @@ public final class WidgetEditorActivity extends Activity {
         if (WidgetComponent.TYPE_BUTTON.equals(type)) return "按钮";
         if (WidgetComponent.TYPE_SONG_TITLE.equals(type)) return "歌曲名称";
         if (WidgetComponent.TYPE_ARTIST.equals(type)) return "歌手";
+        if (WidgetComponent.TYPE_LYRIC_CURRENT.equals(type)) return "当前歌词";
+        if (WidgetComponent.TYPE_LYRIC_NEXT.equals(type)) return "下一句歌词";
         return "文本";
     }
 

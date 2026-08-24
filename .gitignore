@@ -19,3 +19,4 @@ reverse/dex/*.dex
 archive/*.apk
 artifacts/*.apk
 artifacts/*.aab
+/work/

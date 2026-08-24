@@ -182,6 +182,10 @@ final class WidgetCanvasView extends View {
                 value = value.isEmpty() ? "歌曲名称" : value;
             } else if (WidgetComponent.TYPE_ARTIST.equals(component.type)) {
                 value = value.isEmpty() ? "歌手" : value;
+            } else if (WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)) {
+                value = value.isEmpty() ? "当前歌词" : value;
+            } else if (WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type)) {
+                value = value.isEmpty() ? "下一句歌词" : value;
             }
             drawText(canvas, rect, component, value.isEmpty() ? "文本" : value);
         }

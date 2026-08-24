@@ -25,10 +25,25 @@ Notification access is never enabled silently. The configuration App links to An
 - `LyricsProvider` will be separate because standard MediaSession metadata normally does not provide synchronized lyrics.
 - Player-specific hooks must publish structured lyric/timing data to the module and must not leak reflected player classes into Widget JSON or rendering code.
 
+## NetEase Cloud Music 9.5.61 research
+
+The adapter was derived from the APK installed on the target phone (`com.netease.cloudmusic`, versionName `9.5.61`, versionCode `9005061`), rather than copied from an older online class map.
+
+- Main-process class `com.netease.cloudmusic.module.lyric.e` is the `LrcLoaderManager` singleton.
+- Its `o0(LyricInfo, boolean)` method is the centralized loaded-lyric delivery path.
+- `LyricInfo` exposes music ID, sorted lines, lyric state and user offset.
+- `CommonLyricLine` exposes original text, translation, romanization and start/end milliseconds.
+- The adapter hooks this model callback and never scrapes a player-page `TextView`.
+
+The NetEase process may call only two specially guarded provider methods: publish sanitized lyric timing data and report adapter compatibility. It cannot read Widget configuration or execute actions. At most 320 lines and 240 characters per text field are accepted to stay below Binder transaction limits, then stored as schema-v1 structured data. Runtime current/next-line resolution uses the MediaSession position and runs every 500 ms only while a lyric component is visible.
+
+The LSPosed scope remains mandatory for FlipHome. NetEase Cloud Music is an additional optional scope used only for synchronized lyrics.
+
 ## Pending device proof
 
 - User-enable the listener in Android settings.
 - Verify metadata and previous/play-pause/next with NetEase Cloud Music first.
 - Verify session switching and no-session fallback.
+- Device-verify the 9.5.61 model callback after enabling the optional NetEase scope.
+- Verify current/next-line synchronization and user lyric-offset semantics with real playback.
 - Add album-art, playback-state and progress components.
-- Research a maintainable NetEase lyric source and implement current/next-line synchronization.

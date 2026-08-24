@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-24 09:06 CST
+Last updated: 2026-08-24 09:22 CST
 
 ## DONE
 
@@ -43,13 +43,17 @@ Last updated: 2026-08-24 09:06 CST
 - Added song/artist canvas components plus previous, play/pause and next actions; runtime playback polling stops whenever the Widget is hidden or detached.
 - Exposed media notification-access status in the configuration App without silently granting privileged access.
 - Upgraded live-refresh health reporting to record actual refresh success/failure instead of only observer registration.
+- Reverse-engineered the target phone's NetEase Cloud Music 9.5.61 APK and located the model-level `LrcLoaderManager` loaded-lyric callback and timed line records.
+- Added a guarded, optional NetEase LSPosed adapter that publishes sanitized original/translated/romanized lyric lines without scraping UI text.
+- Added a generic `LyricsProvider`, persisted lyric schema, binary-search timeline resolution, current/next lyric canvas components and visibility-aware 500 ms runtime updates.
+- Bumped the development APK to 0.5.0-p1 (versionCode 6) because synchronized lyrics add an optional `com.netease.cloudmusic` LSPosed scope.
 
 ## IN PROGRESS
 
 - P1: finish exact canvas property UX and prove saved text/time/button components on the unlocked cover runtime.
 - P1: verify volume, lock and flashlight actions from the real cover page.
 - P1: finish the gallery read-grant regression after the secure cover display is unlocked.
-- P2: enable and device-test the MediaSession bridge with NetEase Cloud Music, then add album art, progress and the separate lyrics provider.
+- P2: enable and device-test MediaSession access and the optional NetEase scope, verify lyric timing/offset, then add album art and progress.
 
 ## FAILED
 
@@ -68,4 +72,5 @@ Last updated: 2026-08-24 09:06 CST
 3. Complete repeated official ↔ custom ↔ official swipe regression.
 4. Finish component property polish and remove the remaining legacy fixed-button editor projection.
 5. Enable the media notification listener manually and verify NetEase metadata and transport controls.
-6. Implement album art/progress components and begin the separate NetEase lyrics provider.
+6. Verify current/next lyric timing against real playback, including translated lyrics and user offset.
+7. Implement album art/progress components.

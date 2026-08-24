@@ -10,6 +10,7 @@
 
     <queries>
         <package android:name="com.miui.fliphome" />
+        <package android:name="com.netease.cloudmusic" />
         <package android:name="org.lsposed.manager" />
         <package android:name="io.github.lsposed.manager" />
     </queries>

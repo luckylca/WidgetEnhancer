@@ -14,7 +14,7 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
-/** Hooks only FlipHome's official widget catalogue and MAML host factory. */
+/** Routes each explicitly scoped package to its versioned integration adapter. */
 public final class HookEntry implements IXposedHookLoadPackage {
     private static final String INFO_CLASS = "com.miui.fliphome.widget.FlipWidgetInfo";
     private static final String CONFIG_CLASS = "com.miui.fliphome.widget.model.FlipWatchDefaultConfig";
@@ -24,6 +24,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
+        if (Contract.NETEASE_PACKAGE.equals(param.packageName)) {
+            if (param.processName == null || Contract.NETEASE_PACKAGE.equals(param.processName)) {
+                NeteaseLyricHook.install(param.classLoader);
+            }
+            return;
+        }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
         try {
             Class<?> infoClass = XposedHelpers.findClass(INFO_CLASS, param.classLoader);

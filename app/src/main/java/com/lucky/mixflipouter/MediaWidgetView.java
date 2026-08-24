@@ -46,6 +46,7 @@ final class MediaWidgetView extends FrameLayout {
     private final List<LayerBinding> layerBindings = new ArrayList<>();
     private final List<TimeBinding> timeBindings = new ArrayList<>();
     private final List<PlaybackBinding> playbackBindings = new ArrayList<>();
+    private final List<PlaybackBinding> lyricBindings = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private TextureView videoTexture;
     private MediaPlayer mediaPlayer;
@@ -66,6 +67,14 @@ final class MediaWidgetView extends FrameLayout {
             if (!runtimeVisible()) return;
             updatePlaybackBindings();
             mainHandler.postDelayed(this, 2_000L);
+        }
+    };
+    private final Runnable lyricTicker = new Runnable() {
+        @Override
+        public void run() {
+            if (!runtimeVisible()) return;
+            updateLyricBindings();
+            mainHandler.postDelayed(this, 500L);
         }
     };
 
@@ -133,7 +142,9 @@ final class MediaWidgetView extends FrameLayout {
         if (WidgetComponent.TYPE_TEXT.equals(component.type)
                 || WidgetComponent.TYPE_TIME.equals(component.type)
                 || WidgetComponent.TYPE_SONG_TITLE.equals(component.type)
-                || WidgetComponent.TYPE_ARTIST.equals(component.type)) {
+                || WidgetComponent.TYPE_ARTIST.equals(component.type)
+                || WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
+                || WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type)) {
             TextView text = new TextView(getContext());
             styleText(text, component);
             if (WidgetComponent.TYPE_TIME.equals(component.type)) {
@@ -143,6 +154,10 @@ final class MediaWidgetView extends FrameLayout {
             } else if (WidgetComponent.TYPE_SONG_TITLE.equals(component.type)
                     || WidgetComponent.TYPE_ARTIST.equals(component.type)) {
                 playbackBindings.add(new PlaybackBinding(text, component));
+                text.setText(component.content);
+            } else if (WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
+                    || WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type)) {
+                lyricBindings.add(new PlaybackBinding(text, component));
                 text.setText(component.content);
             } else {
                 text.setText(component.content);
@@ -415,6 +430,33 @@ final class MediaWidgetView extends FrameLayout {
         }
     }
 
+    private void updateLyricBindings() {
+        if (lyricBindings.isEmpty()) return;
+        try {
+            Bundle state = getContext().getContentResolver().call(
+                    Contract.PROVIDER_URI, "get_lyrics_state", null, null);
+            boolean available = state != null && state.getBoolean("available");
+            for (PlaybackBinding binding : lyricBindings) {
+                String value;
+                if (!available) {
+                    value = binding.component.content.isEmpty()
+                            ? (WidgetComponent.TYPE_LYRIC_NEXT.equals(binding.component.type)
+                            ? "下一句歌词" : "当前歌词")
+                            : binding.component.content;
+                } else {
+                    String key = WidgetComponent.TYPE_LYRIC_NEXT.equals(binding.component.type)
+                            ? "next" : "current";
+                    value = state.getString(key, "");
+                    if (value == null || value.isEmpty()) {
+                        value = state.getString(key + "_translation", "");
+                    }
+                }
+                binding.view.setText(value == null || value.isEmpty() ? "…" : value);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     private boolean runtimeVisible() {
         return isAttachedToWindow() && getVisibility() == VISIBLE
                 && getWindowVisibility() == VISIBLE && isShown();
@@ -423,6 +465,11 @@ final class MediaWidgetView extends FrameLayout {
     private void updatePlaybackSchedule() {
         mainHandler.removeCallbacks(playbackTicker);
         if (!playbackBindings.isEmpty() && runtimeVisible()) playbackTicker.run();
+    }
+
+    private void updateLyricSchedule() {
+        mainHandler.removeCallbacks(lyricTicker);
+        if (!lyricBindings.isEmpty() && runtimeVisible()) lyricTicker.run();
     }
 
     private static int parseColor(String value, int fallback) {
@@ -495,6 +542,7 @@ final class MediaWidgetView extends FrameLayout {
             timeTicker.run();
         }
         updatePlaybackSchedule();
+        updateLyricSchedule();
         if (videoTexture != null && videoTexture.isAvailable() && mediaPlayer == null) {
             createPlayer(videoTexture.getSurfaceTexture());
         } else {
@@ -506,6 +554,7 @@ final class MediaWidgetView extends FrameLayout {
     protected void onDetachedFromWindow() {
         mainHandler.removeCallbacks(timeTicker);
         mainHandler.removeCallbacks(playbackTicker);
+        mainHandler.removeCallbacks(lyricTicker);
         releasePlayer();
         super.onDetachedFromWindow();
     }
@@ -522,6 +571,7 @@ final class MediaWidgetView extends FrameLayout {
         super.onVisibilityChanged(changedView, visibility);
         maybePlay();
         updatePlaybackSchedule();
+        updateLyricSchedule();
     }
 
     @Override
@@ -529,6 +579,7 @@ final class MediaWidgetView extends FrameLayout {
         super.onWindowVisibilityChanged(visibility);
         maybePlay();
         updatePlaybackSchedule();
+        updateLyricSchedule();
     }
 
     private int dp(int value) {

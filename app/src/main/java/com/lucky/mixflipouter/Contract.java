@@ -5,9 +5,11 @@ import android.net.Uri;
 final class Contract {
     static final String MODULE_PACKAGE = "com.lucky.mixflipouter";
     static final String TARGET_PACKAGE = "com.miui.fliphome";
+    static final String NETEASE_PACKAGE = "com.netease.cloudmusic";
     static final String GALLERY_PACKAGE = "com.miui.gallery";
     static final String AUTHORITY = "com.lucky.mixflipouter.provider";
     static final Uri PROVIDER_URI = Uri.parse("content://" + AUTHORITY);
+    static final Uri LYRICS_URI = Uri.parse("content://" + AUTHORITY + "/lyrics");
     static final String CUSTOM_TYPE = "mixflip_custom";
     static final String WIDGET_FILE_PREFIX = "mixflip_custom_widget_";
     static final String DEFAULT_WIDGET_ID = "default";

@@ -357,10 +357,12 @@ public final class SettingsActivity extends Activity {
             boolean runtime = health != null && health.getBoolean("runtime_ok");
             boolean compatibility = health != null && health.getBoolean("compatibility_ok");
             boolean liveRefresh = health != null && health.getBoolean("live_refresh_ok");
+            boolean lyrics = health != null && health.getBoolean("lyrics_ok");
             hookStatus.setText((compatibility ? "✓" : "○") + " 兼容检查    "
                     + (catalogue ? "✓" : "○") + " 系统列表\n"
                     + (runtime ? "✓" : "○") + " 外屏运行时    "
-                    + (liveRefresh ? "✓" : "○") + " 即时刷新");
+                    + (liveRefresh ? "✓" : "○") + " 即时刷新\n"
+                    + (lyrics ? "✓" : "○") + " 网易云歌词适配");
             hookStatus.setTextColor(color(catalogue
                     ? androidx.appcompat.R.attr.colorPrimary
                     : com.google.android.material.R.attr.colorOnSurfaceVariant));

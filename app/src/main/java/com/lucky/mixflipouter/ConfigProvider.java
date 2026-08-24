@@ -21,6 +21,7 @@ import java.util.List;
 
 public final class ConfigProvider extends ContentProvider {
     private WidgetRepository repository;
+    private LyricsProvider lyricsProvider;
     private CameraManager cameraManager;
     private String torchCameraId;
     private volatile boolean torchOn;
@@ -29,6 +30,7 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public boolean onCreate() {
         repository = new WidgetRepository(getContext());
+        lyricsProvider = new LyricsStateStore(getContext());
         initializeTorch();
         return true;
     }
@@ -36,6 +38,25 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
         if ("get_health".equals(method)) return getHealth();
+        if ("publish_lyrics".equals(method)) {
+            enforceNeteaseCaller();
+            Bundle result = lyricsProvider.publish(extras);
+            if (result.getBoolean("ok")) {
+                getContext().getContentResolver().notifyChange(Contract.LYRICS_URI, null);
+                Bundle report = new Bundle();
+                report.putString("stage", "lyrics");
+                report.putBoolean("ok", true);
+                report.putString("message", "已接收网易云结构化歌词 · "
+                        + result.getInt("line_count", 0) + " 行");
+                saveHookReport(report);
+            }
+            return result;
+        }
+        if ("report_lyrics_hook".equals(method)) {
+            enforceNeteaseCaller();
+            saveHookReport(extras);
+            return Bundle.EMPTY;
+        }
         enforceAllowedCaller();
         if ("get_config".equals(method) || "get_widget".equals(method)) {
             return getWidget(arg == null ? Contract.DEFAULT_WIDGET_ID : arg);
@@ -43,6 +64,9 @@ public final class ConfigProvider extends ContentProvider {
         if ("list_widgets".equals(method)) return listWidgets();
         if ("get_system_state".equals(method)) return getSystemState();
         if ("get_playback_state".equals(method)) return PlaybackStateStore.provider().snapshot();
+        if ("get_lyrics_state".equals(method)) {
+            return lyricsProvider.snapshot(PlaybackStateStore.provider().snapshot());
+        }
         if ("grant_media".equals(method)) {
             String packageName = extras == null ? null : extras.getString("package");
             if (!Contract.GALLERY_PACKAGE.equals(packageName)) {
@@ -181,7 +205,7 @@ public final class ConfigProvider extends ContentProvider {
     private Bundle getHealth() {
         SharedPreferences p = prefs();
         Bundle out = new Bundle();
-        for (String stage : new String[]{"compatibility", "catalogue", "runtime", "live_refresh"}) {
+        for (String stage : new String[]{"compatibility", "catalogue", "runtime", "live_refresh", "lyrics"}) {
             out.putBoolean(stage + "_ok", p.getBoolean("hook_" + stage + "_ok", false));
             out.putString(stage + "_message", p.getString("hook_" + stage + "_message", "尚未收到上报"));
             out.putLong(stage + "_time", p.getLong("hook_" + stage + "_time", 0));
@@ -258,6 +282,17 @@ public final class ConfigProvider extends ContentProvider {
         if (Binder.getCallingUid() != android.os.Process.myUid()) {
             throw new SecurityException("Only the module app can change system state");
         }
+    }
+
+    private void enforceNeteaseCaller() {
+        int uid = Binder.getCallingUid();
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        if (packages != null) {
+            for (String name : packages) {
+                if (Contract.NETEASE_PACKAGE.equals(name)) return;
+            }
+        }
+        throw new SecurityException("Only NetEase Cloud Music can publish lyrics");
     }
 
     @Override public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) { return null; }
