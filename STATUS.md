@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-24 08:13 CST
+Last updated: 2026-08-24 08:17 CST
 
 ## DONE
 
@@ -20,7 +20,10 @@ Last updated: 2026-08-24 08:13 CST
 - Verified two user Widgets (one video and one image) dynamically appear in the official `自定义` group; FlipHome injected both and built a five-item runtime list.
 - Replaced raw official-list media paths with cached 440×720 preview PNGs using center crop and rounded alpha; video previews use the first frame plus a bottom-right play badge.
 - Matched runtime media to FlipHome's own 103dp×174dp container and `launcher_widget_radius` (20dp), removing the incorrect nested 32dp image clip that exposed black corners.
-- Built APK 0.3.0-p1 successfully and passed Android lint.
+- Replaced `VideoView`/`SurfaceView` rendering with a crop-aware `TextureView` player so official outline clipping also applies to video frames.
+- Added a FlipHome content observer that rebuilds selected custom hosts and refreshes an open official settings page after repository changes.
+- Measured the real custom runtime at 335×566 inside a 335×566 host, matching FlipHome's 103dp×174dp resource at device density.
+- Built APK 0.3.1-p1 successfully and passed Android lint.
 
 ## IN PROGRESS
 

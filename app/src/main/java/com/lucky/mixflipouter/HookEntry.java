@@ -77,6 +77,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam hook) {
                 try {
+                    Context context = currentFlipHomeContext();
+                    LiveRefreshBridge.install(context, loader);
+                    LiveRefreshBridge.trackSettingsViewModel(hook.thisObject);
                     @SuppressWarnings("unchecked")
                     Map<String, String> typeMap = (Map<String, String>)
                             XposedHelpers.getObjectField(hook.thisObject, "mWidgetTypeMap");
@@ -118,6 +121,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if (!isOurInfo(info)) return;
                         Context context = (Context) hook.args[0];
                         try {
+                            LiveRefreshBridge.install(context, loader);
                             if (!(hook.getResult() instanceof ViewGroup)) {
                                 report(context, "runtime", false, "MAML 兼容宿主创建失败");
                                 return;

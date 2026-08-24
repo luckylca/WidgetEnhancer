@@ -7,27 +7,34 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Outline;
+import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.view.Gravity;
+import android.view.Surface;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
+import android.view.TextureView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.VideoView;
 
 import java.io.InputStream;
 
 @SuppressLint("ViewConstructor")
 final class MediaWidgetView extends FrameLayout {
     private final WidgetConfig config;
-    private VideoView videoView;
+    private TextureView videoTexture;
+    private MediaPlayer mediaPlayer;
+    private boolean playerPrepared;
+    private int videoWidth;
+    private int videoHeight;
 
     MediaWidgetView(Context context, WidgetConfig config) {
         super(context);
@@ -46,14 +53,30 @@ final class MediaWidgetView extends FrameLayout {
             addView(image, full);
             image.post(() -> image.setImageBitmap(loadScaledBitmap(Math.max(getWidth(), 1208), Math.max(getHeight(), 1392))));
         } else if ("video".equals(config.mediaType)) {
-            videoView = new VideoView(getContext());
-            videoView.setVideoURI(Contract.mediaUri(config.id));
-            videoView.setOnPreparedListener(player -> preparePlayer(player));
-            videoView.setOnErrorListener((player, what, extra) -> {
-                showPlaceholder("视频无法播放\n请尝试 H.264 / MP4");
-                return true;
+            videoTexture = new TextureView(getContext());
+            videoTexture.setOpaque(true);
+            videoTexture.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+                @Override
+                public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
+                    createPlayer(texture);
+                }
+
+                @Override
+                public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) {
+                    updateVideoTransform(width, height);
+                }
+
+                @Override
+                public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
+                    releasePlayer();
+                    return true;
+                }
+
+                @Override
+                public void onSurfaceTextureUpdated(SurfaceTexture texture) {
+                }
             });
-            addView(videoView, full);
+            addView(videoTexture, full);
         } else {
             showPlaceholder("MIX Flip 外屏扩展\n请在模块 App 中选择图片或视频");
         }
@@ -73,11 +96,75 @@ final class MediaWidgetView extends FrameLayout {
         setClipToOutline(true);
     }
 
-    private void preparePlayer(MediaPlayer player) {
-        player.setLooping(config.loop);
-        float volume = config.mute ? 0f : 1f;
-        player.setVolume(volume, volume);
-        if (isShown()) videoView.start();
+    private void createPlayer(SurfaceTexture texture) {
+        releasePlayer();
+        MediaPlayer player = new MediaPlayer();
+        mediaPlayer = player;
+        Surface surface = new Surface(texture);
+        try {
+            player.setDataSource(getContext(), Contract.mediaUri(config.id));
+            player.setSurface(surface);
+            player.setLooping(config.loop);
+            float volume = config.mute ? 0f : 1f;
+            player.setVolume(volume, volume);
+            player.setOnVideoSizeChangedListener((media, width, height) -> {
+                videoWidth = width;
+                videoHeight = height;
+                updateVideoTransform(videoTexture.getWidth(), videoTexture.getHeight());
+            });
+            player.setOnPreparedListener(media -> {
+                if (media != mediaPlayer) return;
+                playerPrepared = true;
+                maybePlay();
+            });
+            player.setOnErrorListener((media, what, extra) -> {
+                if (media == mediaPlayer) showPlaceholder("视频无法播放\n请尝试 H.264 / MP4");
+                return true;
+            });
+            player.prepareAsync();
+        } catch (Throwable error) {
+            releasePlayer();
+            showPlaceholder("视频无法播放\n请尝试 H.264 / MP4");
+        } finally {
+            surface.release();
+        }
+    }
+
+    private void updateVideoTransform(int viewWidth, int viewHeight) {
+        if (videoTexture == null || viewWidth <= 0 || viewHeight <= 0
+                || videoWidth <= 0 || videoHeight <= 0) return;
+        float viewAspect = viewWidth / (float) viewHeight;
+        float videoAspect = videoWidth / (float) videoHeight;
+        float scaleX = videoAspect > viewAspect ? videoAspect / viewAspect : 1f;
+        float scaleY = videoAspect < viewAspect ? viewAspect / videoAspect : 1f;
+        Matrix transform = new Matrix();
+        transform.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f);
+        videoTexture.setTransform(transform);
+    }
+
+    private void maybePlay() {
+        MediaPlayer player = mediaPlayer;
+        if (player == null || !playerPrepared) return;
+        boolean visible = isAttachedToWindow() && getVisibility() == VISIBLE
+                && getWindowVisibility() == VISIBLE && isShown();
+        try {
+            if (visible) player.start(); else player.pause();
+        } catch (IllegalStateException ignored) {
+        }
+    }
+
+    private void releasePlayer() {
+        MediaPlayer player = mediaPlayer;
+        mediaPlayer = null;
+        playerPrepared = false;
+        videoWidth = 0;
+        videoHeight = 0;
+        if (player == null) return;
+        try {
+            player.reset();
+        } catch (Throwable ignored) {
+        }
+        player.release();
     }
 
     private void showPlaceholder(String message) {
@@ -183,20 +270,29 @@ final class MediaWidgetView extends FrameLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (videoView != null) videoView.start();
+        if (videoTexture != null && videoTexture.isAvailable() && mediaPlayer == null) {
+            createPlayer(videoTexture.getSurfaceTexture());
+        } else {
+            maybePlay();
+        }
     }
 
     @Override
     protected void onDetachedFromWindow() {
-        if (videoView != null) videoView.stopPlayback();
+        releasePlayer();
         super.onDetachedFromWindow();
     }
 
     @Override
     protected void onVisibilityChanged(View changedView, int visibility) {
         super.onVisibilityChanged(changedView, visibility);
-        if (videoView == null) return;
-        if (visibility == VISIBLE) videoView.start(); else videoView.pause();
+        maybePlay();
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        maybePlay();
     }
 
     private int dp(int value) {
