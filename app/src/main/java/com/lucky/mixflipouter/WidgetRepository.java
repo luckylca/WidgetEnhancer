@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.UUID;
 
 final class WidgetRepository {
-    static final int SCHEMA_VERSION = 1;
+    static final int SCHEMA_VERSION = 2;
     private static final Object LOCK = new Object();
     private static final String STORE_FILE = "widgets-v1.json";
     private static final String ASSET_ROOT = "widgets";
@@ -50,6 +50,21 @@ final class WidgetRepository {
     long revision() {
         synchronized (LOCK) {
             return readState().revision;
+        }
+    }
+
+    boolean isSafeMode() {
+        synchronized (LOCK) {
+            return readState().safeMode;
+        }
+    }
+
+    void setSafeMode(boolean enabled) {
+        synchronized (LOCK) {
+            State state = readState();
+            if (state.safeMode == enabled) return;
+            state.safeMode = enabled;
+            writeNext(state);
         }
     }
 
@@ -131,7 +146,11 @@ final class WidgetRepository {
 
     private void ensureMigrated() {
         synchronized (LOCK) {
-            if (store.getBaseFile().isFile()) return;
+            if (store.getBaseFile().isFile()) {
+                State current = readState();
+                if (current.schemaVersion < SCHEMA_VERSION) writeNext(current);
+                return;
+            }
             SharedPreferences legacy = context.getSharedPreferences(Contract.PREFS, 0);
             WidgetConfig config = new WidgetConfig();
             config.id = Contract.DEFAULT_WIDGET_ID;
@@ -149,7 +168,9 @@ final class WidgetRepository {
             File legacyMedia = new File(context.getFilesDir(), "selected_media");
             if (legacyMedia.isFile()) copyFile(legacyMedia, mediaFile(config.id));
             State state = new State();
+            state.schemaVersion = SCHEMA_VERSION;
             state.revision = 1;
+            state.safeMode = false;
             state.widgets.add(config);
             writeState(state);
         }
@@ -163,7 +184,9 @@ final class WidgetRepository {
             while ((count = input.read(buffer)) >= 0) bytes.write(buffer, 0, count);
             JSONObject root = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name()));
             State state = new State();
+            state.schemaVersion = root.optInt("schemaVersion", 1);
             state.revision = root.optLong("revision", 1);
+            state.safeMode = root.optBoolean("safeMode", false);
             JSONArray widgets = root.optJSONArray("widgets");
             if (widgets != null) {
                 for (int i = 0; i < widgets.length(); i++) {
@@ -193,6 +216,7 @@ final class WidgetRepository {
             JSONObject root = new JSONObject();
             root.put("schemaVersion", SCHEMA_VERSION);
             root.put("revision", state.revision);
+            root.put("safeMode", state.safeMode);
             JSONArray widgets = new JSONArray();
             for (WidgetConfig config : state.widgets) widgets.put(config.toJson());
             root.put("widgets", widgets);
@@ -239,7 +263,9 @@ final class WidgetRepository {
     }
 
     private static final class State {
+        int schemaVersion = SCHEMA_VERSION;
         long revision;
+        boolean safeMode;
         final List<WidgetConfig> widgets = new ArrayList<>();
     }
 }

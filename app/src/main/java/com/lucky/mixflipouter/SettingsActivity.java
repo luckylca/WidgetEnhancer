@@ -1,13 +1,17 @@
 package com.lucky.mixflipouter;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -29,10 +33,14 @@ import java.io.InputStream;
 import java.util.List;
 
 public final class SettingsActivity extends Activity {
+    private static final int REQUEST_CAMERA_FOR_TORCH = 2101;
     private WidgetRepository repository;
     private LinearLayout widgetList;
     private TextView countText;
     private TextView hookStatus;
+    private MaterialSwitch safeModeSwitch;
+    private MaterialButton torchPermission;
+    private MaterialButton torchTest;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -46,6 +54,7 @@ public final class SettingsActivity extends Activity {
         super.onResume();
         renderWidgets();
         updateHookStatus();
+        updateTorchPermission();
     }
 
     private View createContent() {
@@ -118,6 +127,25 @@ public final class SettingsActivity extends Activity {
         hookStatus.setPadding(0, dp(4), 0, dp(10));
         body.addView(hookStatus);
 
+        safeModeSwitch = new MaterialSwitch(this);
+        safeModeSwitch.setText("安全模式（立即停用全部自定义页面）");
+        safeModeSwitch.setChecked(repository.isSafeMode());
+        safeModeSwitch.setOnCheckedChangeListener((button, checked) -> {
+            repository.setSafeMode(checked);
+            Toast.makeText(this, checked
+                    ? "安全模式已开启，配置仍会保留"
+                    : "安全模式已关闭，自定义页面将恢复",
+                    Toast.LENGTH_SHORT).show();
+            renderWidgets();
+        });
+        body.addView(safeModeSwitch, matchWrap());
+
+        torchPermission = outlinedButton("授予手电筒权限", v -> requestPermissions(
+                new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_FOR_TORCH));
+        body.addView(torchPermission, matchWrap());
+        torchTest = outlinedButton("测试手电筒（自动恢复）", v -> testTorch());
+        body.addView(torchTest, matchWrap());
+
         LinearLayout actions = horizontal();
         MaterialButton official = outlinedButton("打开系统小部件", v -> openOfficialWidgets());
         actions.addView(official, weighted());
@@ -128,6 +156,50 @@ public final class SettingsActivity extends Activity {
         body.addView(actions, matchWrap());
         card.addView(body);
         return card;
+    }
+
+    private void updateTorchPermission() {
+        if (torchPermission == null) return;
+        boolean granted = checkSelfPermission(Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+        torchPermission.setText(granted ? "✓ 手电筒权限已就绪" : "授予手电筒权限");
+        torchPermission.setEnabled(!granted);
+        torchTest.setEnabled(granted);
+    }
+
+    private void testTorch() {
+        try {
+            Bundle result = getContentResolver().call(
+                    Contract.PROVIDER_URI, "execute_action", ActionSpec.FLASHLIGHT_ON, null);
+            if (result == null || !result.getBoolean("ok")) {
+                Toast.makeText(this, result == null ? "动作服务无响应"
+                        : result.getString("message", "手电筒不可用"), Toast.LENGTH_LONG).show();
+                return;
+            }
+            boolean wasEnabled = result.getBoolean("previous_enabled");
+            Toast.makeText(this, "手电筒测试通过，正在恢复原状态", Toast.LENGTH_SHORT).show();
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    getContentResolver().call(Contract.PROVIDER_URI, "execute_action",
+                            wasEnabled ? ActionSpec.FLASHLIGHT_ON : ActionSpec.FLASHLIGHT_OFF, null);
+                } catch (Throwable ignored) {
+                }
+            }, 900);
+        } catch (Throwable error) {
+            Toast.makeText(this, "手电筒测试失败：" + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQUEST_CAMERA_FOR_TORCH) {
+            updateTorchPermission();
+            boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+            Toast.makeText(this, granted
+                    ? "手电筒按钮已可用"
+                    : "未授权时手电筒按钮会显示不支持提示", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void renderWidgets() {
@@ -268,8 +340,12 @@ public final class SettingsActivity extends Activity {
                     Contract.PROVIDER_URI, "get_health", null, null);
             boolean catalogue = health != null && health.getBoolean("catalogue_ok");
             boolean runtime = health != null && health.getBoolean("runtime_ok");
-            hookStatus.setText((catalogue ? "✓" : "○") + " 系统列表 Hook    "
-                    + (runtime ? "✓" : "○") + " 外屏运行时");
+            boolean compatibility = health != null && health.getBoolean("compatibility_ok");
+            boolean liveRefresh = health != null && health.getBoolean("live_refresh_ok");
+            hookStatus.setText((compatibility ? "✓" : "○") + " 兼容检查    "
+                    + (catalogue ? "✓" : "○") + " 系统列表\n"
+                    + (runtime ? "✓" : "○") + " 外屏运行时    "
+                    + (liveRefresh ? "✓" : "○") + " 即时刷新");
             hookStatus.setTextColor(color(catalogue
                     ? androidx.appcompat.R.attr.colorPrimary
                     : com.google.android.material.R.attr.colorOnSurfaceVariant));

@@ -9,28 +9,28 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 | Locate and preserve the existing standalone demo | DONE |
 | Document device, packages and current Hook path | DONE |
 | Fix custom photo page integration mismatch | DONE |
-| Make video playback lifecycle-safe | TODO |
+| Make video playback lifecycle-safe | DONE |
 | Identify the real HyperOS outer-screen Settings page | DONE |
 | Inject a dynamic `自定义` Settings group | DONE |
 | Create multiple user Widgets in the app | DONE |
-| Add/remove a selected custom Widget through the system flow | IN PROGRESS |
+| Add/remove a selected custom Widget through the system flow | DONE |
 | Render selected custom Widgets in FlipHome | DONE |
 | Verify official ↔ custom ↔ official swiping repeatedly | TODO |
 | Show LSPosed activation and scope diagnostics | DONE |
-| Add global safe mode and crash degradation | TODO |
+| Add global safe mode and crash degradation | DONE |
 
 ## P1 — Editor and base components
 
 | Item | Status |
 |---|---|
-| Versioned WidgetConfig schema and migration | IN PROGRESS |
+| Versioned WidgetConfig schema and migration | DONE |
 | Material 3 app shell and navigation | IN PROGRESS |
 | Widget list: create/edit/delete/rename/copy/preview/enable | DONE |
-| Canvas editor: drag/resize/layer/delete/copy | TODO |
-| Image, video, text, time and button components | TODO |
-| Volume, flashlight, launch-app and lock actions | TODO |
-| Launchable app picker with icons and labels | TODO |
-| Provider revision and runtime cache invalidation | IN PROGRESS |
+| Canvas editor: drag/resize/layer/delete/copy | IN PROGRESS |
+| Image, video, text, time and button components | IN PROGRESS |
+| Volume, flashlight, launch-app and lock actions | IN PROGRESS |
+| Launchable app picker with icons and labels | DONE |
+| Provider revision and runtime cache invalidation | DONE |
 
 ## P2 — Music and lyrics
 

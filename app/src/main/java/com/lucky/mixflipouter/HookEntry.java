@@ -62,6 +62,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         report(context, "catalogue", false, "没有已启用的自定义 Widget");
                         return;
                     }
+                    report(context, "compatibility", true,
+                            "FlipHome catalogue / settings / runtime signatures matched");
                     report(context, "catalogue", true, "已注入 " + added + " 个 Widget");
                 } catch (Throwable error) {
                     report(currentFlipHomeContext(), "catalogue", false, error.toString());

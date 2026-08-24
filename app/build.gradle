@@ -10,8 +10,8 @@ android {
         applicationId 'com.lucky.mixflipouter'
         minSdk 30
         targetSdk 36
-        versionCode 4
-        versionName '0.3.1-p1'
+        versionCode 5
+        versionName '0.4.0-p1'
     }
 
     buildTypes {
@@ -30,4 +30,6 @@ android {
 dependencies {
     compileOnly 'de.robv.android.xposed:api:82'
     implementation 'com.google.android.material:material:1.14.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

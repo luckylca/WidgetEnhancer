@@ -1,6 +1,8 @@
 package com.lucky.mixflipouter;
 
 import android.annotation.SuppressLint;
+import android.app.Instrumentation;
+import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -12,47 +14,88 @@ import android.graphics.Outline;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
+import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.view.TextureView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
 
 @SuppressLint("ViewConstructor")
 final class MediaWidgetView extends FrameLayout {
     private final WidgetConfig config;
+    private final List<LayerBinding> layerBindings = new ArrayList<>();
+    private final List<TimeBinding> timeBindings = new ArrayList<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private TextureView videoTexture;
     private MediaPlayer mediaPlayer;
     private boolean playerPrepared;
     private int videoWidth;
     private int videoHeight;
+    private final Runnable timeTicker = new Runnable() {
+        @Override
+        public void run() {
+            for (TimeBinding binding : timeBindings) updateTime(binding);
+            long now = System.currentTimeMillis();
+            mainHandler.postDelayed(this, 60_050L - now % 60_000L);
+        }
+    };
 
     MediaWidgetView(Context context, WidgetConfig config) {
         super(context);
         this.config = config;
         setBackgroundColor(Color.BLACK);
         applyOfficialWidgetOutline();
-        createMediaLayer();
-        createButtonLayer();
+        createComponentLayers();
     }
 
-    private void createMediaLayer() {
-        LayoutParams full = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
-        if ("image".equals(config.mediaType)) {
+    private void createComponentLayers() {
+        ArrayList<WidgetComponent> components = new ArrayList<>(config.components);
+        components.sort(Comparator.comparingInt(component -> component.zIndex));
+        for (WidgetComponent component : components) {
+            if (!component.visible) continue;
+            View layer = createLayer(component);
+            if (layer == null) continue;
+            addView(layer, new LayoutParams(1, 1));
+            layerBindings.add(new LayerBinding(layer, component));
+            applyComponentOutline(layer, component);
+        }
+        if (layerBindings.isEmpty()) {
+            showPlaceholder("MIX Flip 外屏扩展\n请在模块 App 中添加组件");
+        }
+    }
+
+    private View createLayer(WidgetComponent component) {
+        if (WidgetComponent.TYPE_IMAGE.equals(component.type)) {
             ImageView image = new ImageView(getContext());
-            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            addView(image, full);
+            image.setScaleType(imageScaleType(component.fillMode));
+            image.setClickable(true);
+            image.setFocusable(true);
+            image.setOnClickListener(view -> openImageInGallery());
             image.post(() -> image.setImageBitmap(loadScaledBitmap(Math.max(getWidth(), 1208), Math.max(getHeight(), 1392))));
-        } else if ("video".equals(config.mediaType)) {
+            return image;
+        }
+        if (WidgetComponent.TYPE_VIDEO.equals(component.type)) {
+            if (videoTexture != null) return null;
             videoTexture = new TextureView(getContext());
             videoTexture.setOpaque(true);
             videoTexture.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
@@ -76,10 +119,69 @@ final class MediaWidgetView extends FrameLayout {
                 public void onSurfaceTextureUpdated(SurfaceTexture texture) {
                 }
             });
-            addView(videoTexture, full);
-        } else {
-            showPlaceholder("MIX Flip 外屏扩展\n请在模块 App 中选择图片或视频");
+            return videoTexture;
         }
+        if (WidgetComponent.TYPE_TEXT.equals(component.type)
+                || WidgetComponent.TYPE_TIME.equals(component.type)) {
+            TextView text = new TextView(getContext());
+            styleText(text, component);
+            if (WidgetComponent.TYPE_TIME.equals(component.type)) {
+                TimeBinding binding = new TimeBinding(text, component);
+                timeBindings.add(binding);
+                updateTime(binding);
+            } else {
+                text.setText(component.content);
+            }
+            return text;
+        }
+        if (WidgetComponent.TYPE_BUTTON.equals(component.type)) {
+            Button button = new Button(getContext());
+            button.setAllCaps(false);
+            button.setText(component.content);
+            button.setTextColor(parseColor(component.color, Color.WHITE));
+            button.setGravity(Gravity.CENTER);
+            button.setPadding(0, 0, 0, 0);
+            button.setOnClickListener(view -> performAction(component.actionType, component.actionValue));
+            return button;
+        }
+        return null;
+    }
+
+    private ImageView.ScaleType imageScaleType(String fillMode) {
+        if ("contain".equals(fillMode)) return ImageView.ScaleType.CENTER_INSIDE;
+        if ("stretch".equals(fillMode)) return ImageView.ScaleType.FIT_XY;
+        return ImageView.ScaleType.CENTER_CROP;
+    }
+
+    private void styleText(TextView text, WidgetComponent component) {
+        text.setTextColor(parseColor(component.color, Color.WHITE));
+        text.setGravity(textGravity(component.textAlign));
+        text.setIncludeFontPadding(false);
+    }
+
+    private int textGravity(String alignment) {
+        if ("left".equals(alignment) || "start".equals(alignment)) {
+            return Gravity.START | Gravity.CENTER_VERTICAL;
+        }
+        if ("right".equals(alignment) || "end".equals(alignment)) {
+            return Gravity.END | Gravity.CENTER_VERTICAL;
+        }
+        return Gravity.CENTER;
+    }
+
+    private void applyComponentOutline(View layer, WidgetComponent component) {
+        if (component.cornerRadius <= 0) return;
+        layer.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                float scale = Math.min(
+                        getWidth() / WidgetConfig.CANVAS_WIDTH,
+                        getHeight() / WidgetConfig.CANVAS_HEIGHT);
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(),
+                        component.cornerRadius * scale);
+            }
+        });
+        layer.setClipToOutline(true);
     }
 
     private void applyOfficialWidgetOutline() {
@@ -177,60 +279,29 @@ final class MediaWidgetView extends FrameLayout {
         addView(text, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
     }
 
-    private void createButtonLayer() {
-        int active = 0;
-        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
-            if (!config.labels[i].trim().isEmpty() && !config.actionValues[i].trim().isEmpty()) active++;
-        }
-        if (active == 0) return;
-
-        GridLayout grid = new GridLayout(getContext());
-        grid.setColumnCount(active == 1 ? 1 : 2);
-        grid.setRowCount((active + 1) / 2);
-        grid.setPadding(dp(18), dp(10), dp(18), dp(18));
-
-        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
-            String label = config.labels[i].trim();
-            String value = config.actionValues[i].trim();
-            if (label.isEmpty() || value.isEmpty()) continue;
-            Button button = new Button(getContext());
-            button.setAllCaps(false);
-            button.setText(label);
-            button.setTextColor(Color.WHITE);
-            button.setTextSize(14);
-            button.setGravity(Gravity.CENTER);
-            button.setPadding(dp(8), 0, dp(8), 0);
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(0xB3202020);
-            background.setCornerRadius(dp(18));
-            background.setStroke(dp(1), 0x55FFFFFF);
-            button.setBackground(background);
-            final int index = i;
-            button.setOnClickListener(v -> performAction(index));
-
-            GridLayout.LayoutParams cell = new GridLayout.LayoutParams();
-            cell.width = 0;
-            cell.height = dp(52);
-            cell.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-            cell.setMargins(dp(5), dp(5), dp(5), dp(5));
-            grid.addView(button, cell);
-        }
-
-        LayoutParams controls = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-        addView(grid, controls);
-    }
-
-    private void performAction(int index) {
-        String type = config.actionTypes[index];
-        String value = config.actionValues[index].trim();
+    private void performAction(String type, String rawValue) {
+        String value = rawValue == null ? "" : rawValue.trim();
         try {
-            if ("uri".equals(type)) {
+            if (ActionSpec.VOLUME_UP.equals(type)) {
+                adjustMusicVolume(AudioManager.ADJUST_RAISE);
+            } else if (ActionSpec.VOLUME_DOWN.equals(type)) {
+                adjustMusicVolume(AudioManager.ADJUST_LOWER);
+            } else if (ActionSpec.MUTE_TOGGLE.equals(type)) {
+                adjustMusicVolume(AudioManager.ADJUST_TOGGLE_MUTE);
+            } else if (ActionSpec.isFlashlight(type)) {
+                performProviderAction(type);
+            } else if (ActionSpec.LOCK_SCREEN.equals(type)) {
+                lockScreen();
+            } else if (ActionSpec.OPEN_URI.equals(type)) {
+                if (value.isEmpty()) throw new IllegalArgumentException("尚未设置 URI");
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(value));
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 getContext().startActivity(intent);
-            } else if ("broadcast".equals(type)) {
+            } else if (ActionSpec.SEND_BROADCAST.equals(type)) {
+                if (value.isEmpty()) throw new IllegalArgumentException("尚未设置广播 action");
                 getContext().sendBroadcast(new Intent(value));
             } else {
+                if (value.isEmpty()) throw new IllegalArgumentException("尚未选择应用");
                 Intent intent;
                 if (value.contains("/")) {
                     ComponentName component = ComponentName.unflattenFromString(value);
@@ -246,6 +317,109 @@ final class MediaWidgetView extends FrameLayout {
         } catch (Throwable error) {
             Toast.makeText(getContext(), "按键执行失败：" + error.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void adjustMusicVolume(int direction) {
+        AudioManager audio = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        if (audio == null) throw new IllegalStateException("音量服务不可用");
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI);
+    }
+
+    private void performProviderAction(String type) {
+        Bundle result = getContext().getContentResolver().call(
+                Contract.PROVIDER_URI, "execute_action", type, null);
+        if (result == null || !result.getBoolean("ok")) {
+            throw new IllegalStateException(result == null
+                    ? "动作服务无响应" : result.getString("message", "动作执行失败"));
+        }
+    }
+
+    private void lockScreen() {
+        new Thread(() -> {
+            try {
+                // FlipHome is a privileged system package with INJECT_EVENTS on this firmware.
+                new Instrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_POWER);
+            } catch (Throwable error) {
+                post(() -> Toast.makeText(getContext(),
+                        "锁屏执行失败：" + error.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }, "mixflip-lock-screen").start();
+    }
+
+    private void openImageInGallery() {
+        Uri media = Contract.mediaUri(config.id);
+        Bundle grant = new Bundle();
+        grant.putString("package", Contract.GALLERY_PACKAGE);
+        try {
+            getContext().getContentResolver().call(
+                    Contract.PROVIDER_URI, "grant_media", config.id, grant);
+        } catch (Throwable error) {
+            Toast.makeText(getContext(), "无法授权系统相册读取图片", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(media, config.mimeType)
+                .setPackage(Contract.GALLERY_PACKAGE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setClipData(ClipData.newRawUri("MIX Flip Widget image", media));
+        try {
+            getContext().startActivity(intent);
+        } catch (Throwable error) {
+            Toast.makeText(getContext(), "无法打开系统相册", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void updateTime(TimeBinding binding) {
+        String pattern = binding.component.content.trim();
+        if (pattern.isEmpty()) pattern = "HH:mm";
+        try {
+            binding.view.setText(new SimpleDateFormat(pattern, Locale.getDefault()).format(new Date()));
+        } catch (IllegalArgumentException invalidPattern) {
+            binding.view.setText(new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date()));
+        }
+    }
+
+    private static int parseColor(String value, int fallback) {
+        try {
+            return Color.parseColor(value);
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private void updateLayerLayouts(int width, int height) {
+        if (width <= 0 || height <= 0) return;
+        float scaleX = width / WidgetConfig.CANVAS_WIDTH;
+        float scaleY = height / WidgetConfig.CANVAS_HEIGHT;
+        float textScale = Math.min(scaleX, scaleY);
+        for (LayerBinding binding : layerBindings) {
+            WidgetComponent component = binding.component;
+            LayoutParams params = (LayoutParams) binding.view.getLayoutParams();
+            params.leftMargin = Math.round(component.x * scaleX);
+            params.topMargin = Math.round(component.y * scaleY);
+            params.width = Math.max(1, Math.round(component.width * scaleX));
+            params.height = Math.max(1, Math.round(component.height * scaleY));
+            binding.view.setLayoutParams(params);
+            binding.view.setAlpha(component.opacity);
+            binding.view.invalidateOutline();
+
+            if (binding.view instanceof TextView) {
+                ((TextView) binding.view).setTextSize(
+                        TypedValue.COMPLEX_UNIT_PX, component.textSize * textScale);
+            }
+            if (binding.view instanceof Button) {
+                Button button = (Button) binding.view;
+                button.setMinWidth(0);
+                button.setMinHeight(0);
+                GradientDrawable background = new GradientDrawable();
+                background.setColor(0xB3202020);
+                background.setCornerRadius(component.cornerRadius * textScale);
+                background.setStroke(Math.max(1, Math.round(textScale)), 0x55FFFFFF);
+                button.setBackground(background);
+            }
+        }
+        updateVideoTransform(videoTexture == null ? 0 : videoTexture.getWidth(),
+                videoTexture == null ? 0 : videoTexture.getHeight());
     }
 
     private Bitmap loadScaledBitmap(int targetWidth, int targetHeight) {
@@ -270,6 +444,10 @@ final class MediaWidgetView extends FrameLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        if (!timeBindings.isEmpty()) {
+            mainHandler.removeCallbacks(timeTicker);
+            timeTicker.run();
+        }
         if (videoTexture != null && videoTexture.isAvailable() && mediaPlayer == null) {
             createPlayer(videoTexture.getSurfaceTexture());
         } else {
@@ -279,8 +457,16 @@ final class MediaWidgetView extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        mainHandler.removeCallbacks(timeTicker);
         releasePlayer();
         super.onDetachedFromWindow();
+    }
+
+    @Override
+    protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight);
+        updateLayerLayouts(width, height);
+        invalidateOutline();
     }
 
     @Override
@@ -297,5 +483,25 @@ final class MediaWidgetView extends FrameLayout {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static class LayerBinding {
+        final View view;
+        final WidgetComponent component;
+
+        LayerBinding(View view, WidgetComponent component) {
+            this.view = view;
+            this.component = component;
+        }
+    }
+
+    private static final class TimeBinding {
+        final TextView view;
+        final WidgetComponent component;
+
+        TimeBinding(TextView view, WidgetComponent component) {
+            this.view = view;
+            this.component = component;
+        }
     }
 }

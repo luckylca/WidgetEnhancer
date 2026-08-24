@@ -5,6 +5,7 @@ import android.net.Uri;
 final class Contract {
     static final String MODULE_PACKAGE = "com.lucky.mixflipouter";
     static final String TARGET_PACKAGE = "com.miui.fliphome";
+    static final String GALLERY_PACKAGE = "com.miui.gallery";
     static final String AUTHORITY = "com.lucky.mixflipouter.provider";
     static final Uri PROVIDER_URI = Uri.parse("content://" + AUTHORITY);
     static final String CUSTOM_TYPE = "mixflip_custom";

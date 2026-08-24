@@ -4,6 +4,7 @@ import android.content.Context;
 import android.database.ContentObserver;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Bundle;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -42,6 +43,7 @@ final class LiveRefreshBridge {
                         }
                     });
             installed = true;
+            report("live_refresh", true, "配置观察器已注册");
             XposedBridge.log("MixFlipCustom: live config observer installed");
         }
     }
@@ -81,6 +83,11 @@ final class LiveRefreshBridge {
                 model, "getAddedListBlocked");
         if (selected == null) return;
 
+        if (isSafeMode()) {
+            XposedHelpers.callMethod(model, "updateShowList", new ArrayList<>(selected));
+            return;
+        }
+
         boolean hadCustom = false;
         ArrayList<Object> updated = new ArrayList<>(selected.size());
         for (Object info : selected) {
@@ -115,6 +122,28 @@ final class LiveRefreshBridge {
 
     private static boolean isCustom(String fileName) {
         return fileName.startsWith(Contract.WIDGET_FILE_PREFIX);
+    }
+
+    private static boolean isSafeMode() {
+        try {
+            Bundle state = context.getContentResolver().call(
+                    Contract.PROVIDER_URI, "get_system_state", null, null);
+            return state != null && state.getBoolean("safe_mode");
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void report(String stage, boolean ok, String message) {
+        try {
+            Bundle extras = new Bundle();
+            extras.putString("stage", stage);
+            extras.putBoolean("ok", ok);
+            extras.putString("message", message);
+            context.getContentResolver().call(
+                    Contract.PROVIDER_URI, "report_hook", null, extras);
+        } catch (Throwable ignored) {
+        }
     }
 
     private LiveRefreshBridge() {

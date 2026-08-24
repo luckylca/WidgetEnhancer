@@ -2,6 +2,8 @@ package com.lucky.mixflipouter;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -10,6 +12,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -17,13 +20,28 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
+
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Comparator;
 
 public final class WidgetEditorActivity extends Activity {
     private static final int PICK_IMAGE = 1001;
     private static final int PICK_VIDEO = 1002;
-    private static final String[] TYPE_LABELS = {"启动应用", "打开 URI", "发送广播"};
-    private static final String[] TYPE_VALUES = {"package", "uri", "broadcast"};
+    private static final int PICK_APP = 1003;
+    private static final String[] TYPE_LABELS = {
+            "启动应用", "打开 URI", "发送广播",
+            "音量＋", "音量－", "静音切换",
+            "打开手电筒", "关闭手电筒", "切换手电筒", "锁屏"
+    };
+    private static final String[] TYPE_VALUES = {
+            ActionSpec.LAUNCH_APP, ActionSpec.OPEN_URI, ActionSpec.SEND_BROADCAST,
+            ActionSpec.VOLUME_UP, ActionSpec.VOLUME_DOWN, ActionSpec.MUTE_TOGGLE,
+            ActionSpec.FLASHLIGHT_ON, ActionSpec.FLASHLIGHT_OFF,
+            ActionSpec.FLASHLIGHT_TOGGLE, ActionSpec.LOCK_SCREEN
+    };
 
     private WidgetRepository repository;
     private WidgetConfig config;
@@ -32,6 +50,8 @@ public final class WidgetEditorActivity extends Activity {
     private MaterialSwitch loopSwitch;
     private MaterialSwitch muteSwitch;
     private TextView mediaStatus;
+    private WidgetCanvasView canvasView;
+    private TextView selectionStatus;
     private final EditText[] labels = new EditText[Contract.BUTTON_COUNT];
     private final Spinner[] types = new Spinner[Contract.BUTTON_COUNT];
     private final EditText[] values = new EditText[Contract.BUTTON_COUNT];
@@ -70,6 +90,50 @@ public final class WidgetEditorActivity extends Activity {
         enabledSwitch.setTextSize(16);
         root.addView(enabledSwitch, matchWrap());
 
+        section(root, "可视化画布");
+        TextView canvasHint = text("点选组件后拖动；拖右下角橙色圆点可缩放。虚线表示已锁定。", 13,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        canvasHint.setPadding(0, 0, 0, dp(10));
+        root.addView(canvasHint);
+
+        FrameLayout canvasHolder = new FrameLayout(this);
+        canvasView = new WidgetCanvasView(this);
+        FrameLayout.LayoutParams canvasParams = new FrameLayout.LayoutParams(dp(220), dp(360), Gravity.CENTER);
+        canvasHolder.addView(canvasView, canvasParams);
+        root.addView(canvasHolder, new LinearLayout.LayoutParams(-1, dp(372)));
+        canvasView.setListener(new WidgetCanvasView.Listener() {
+            @Override public void onSelectionChanged(WidgetComponent component) {
+                updateSelectionStatus(component);
+            }
+            @Override public void onComponentChanged(WidgetComponent component) {
+                updateSelectionStatus(component);
+            }
+        });
+
+        selectionStatus = text("未选择组件", 14,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        selectionStatus.setGravity(Gravity.CENTER);
+        root.addView(selectionStatus, matchWrap());
+
+        LinearLayout addComponents = horizontal();
+        addComponents.addView(button("＋文本", v -> addTextComponent()), weighted());
+        addComponents.addView(button("＋时间", v -> addTimeComponent()), weighted());
+        addComponents.addView(button("＋按钮", v -> addButtonComponent()), weighted());
+        root.addView(addComponents, matchWrap());
+
+        LinearLayout editComponents = horizontal();
+        editComponents.addView(button("属性", v -> editSelectedComponent()), weighted());
+        editComponents.addView(button("复制", v -> duplicateSelected()), weighted());
+        editComponents.addView(button("删除", v -> deleteSelected()), weighted());
+        editComponents.addView(button("锁定", v -> canvasView.toggleSelectedLock()), weighted());
+        root.addView(editComponents, matchWrap());
+
+        LinearLayout layerActions = horizontal();
+        layerActions.addView(button("下移一层", v -> canvasView.moveLayer(-1)), weighted());
+        layerActions.addView(button("上移一层", v -> canvasView.moveLayer(1)), weighted());
+        root.addView(layerActions, matchWrap());
+        root.addView(button("为选中按钮选择应用", v -> chooseAppForSelected()), matchWrap());
+
         section(root, "背景媒体");
         mediaStatus = text("尚未选择媒体", 14, 0xFF666666);
         mediaStatus.setPadding(0, 0, 0, dp(10));
@@ -89,7 +153,7 @@ public final class WidgetEditorActivity extends Activity {
         root.addView(muteSwitch, matchWrap());
 
         section(root, "自定义按键（最多 4 个）");
-        TextView hint = text("留空的按键不会显示。应用可填包名或“包名/组件名”；URI 示例：alipays://、weixin://；广播填写 action。", 13, 0xFF777777);
+        TextView hint = text("启动应用、URI、广播需要目标值；音量、手电筒和锁屏不需要填写目标。", 13, 0xFF777777);
         hint.setPadding(0, 0, 0, dp(8));
         root.addView(hint);
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) addButtonEditor(root, i);
@@ -139,6 +203,8 @@ public final class WidgetEditorActivity extends Activity {
         nameInput.setText(config.name);
         loopSwitch.setChecked(config.loop);
         muteSwitch.setChecked(config.mute);
+        canvasView.setWidget(config, null);
+        loadCanvasPreview();
         updateMediaStatus();
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             labels[i].setText(config.labels[i]);
@@ -157,8 +223,11 @@ public final class WidgetEditorActivity extends Activity {
             config.actionTypes[i] = TYPE_VALUES[types[i].getSelectedItemPosition()];
             config.actionValues[i] = values[i].getText().toString().trim();
         }
+        config.mergeLegacyEditorState();
         repository.save(config);
-        Toast.makeText(this, "已保存；重新开合外屏以刷新", Toast.LENGTH_LONG).show();
+        canvasView.setWidget(config, null);
+        loadCanvasPreview();
+        Toast.makeText(this, "已保存并通知外屏刷新", Toast.LENGTH_LONG).show();
     }
 
     private void pick(String mime, int request) {
@@ -171,7 +240,20 @@ public final class WidgetEditorActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if (resultCode != RESULT_OK || data == null) return;
+        if (requestCode == PICK_APP) {
+            WidgetComponent component = canvasView.getSelected();
+            if (component == null || !WidgetComponent.TYPE_BUTTON.equals(component.type)) return;
+            component.actionType = ActionSpec.LAUNCH_APP;
+            component.actionValue = data.getStringExtra(AppPickerActivity.EXTRA_COMPONENT);
+            String label = data.getStringExtra(AppPickerActivity.EXTRA_LABEL);
+            if (label != null && !label.isEmpty()) component.content = label;
+            canvasView.invalidate();
+            updateSelectionStatus(component);
+            syncLegacyFieldsFromComponents();
+            return;
+        }
+        if (data.getData() == null) return;
         if (requestCode != PICK_IMAGE && requestCode != PICK_VIDEO) return;
         Uri uri = data.getData();
         String kind = requestCode == PICK_IMAGE ? "image" : "video";
@@ -193,7 +275,10 @@ public final class WidgetEditorActivity extends Activity {
             if (result) {
                 config.mediaType = kind;
                 config.mimeType = mime == null ? ("image".equals(kind) ? "image/*" : "video/*") : mime;
+                config.mergeLegacyEditorState();
                 repository.save(config);
+                canvasView.setWidget(config, null);
+                loadCanvasPreview();
                 updateMediaStatus();
                 Toast.makeText(this, "媒体已导入", Toast.LENGTH_SHORT).show();
             } else {
@@ -206,7 +291,9 @@ public final class WidgetEditorActivity extends Activity {
         repository.clearMedia(config.id);
         config.mediaType = "none";
         config.mimeType = "application/octet-stream";
+        config.mergeLegacyEditorState();
         repository.save(config);
+        canvasView.setWidget(config, null);
         updateMediaStatus();
     }
 
@@ -215,6 +302,230 @@ public final class WidgetEditorActivity extends Activity {
         if ("image".equals(type)) mediaStatus.setText("当前：自定义图片");
         else if ("video".equals(type)) mediaStatus.setText("当前：自定义视频");
         else mediaStatus.setText("尚未选择媒体（也可以只显示按键）");
+    }
+
+    private void loadCanvasPreview() {
+        if ("none".equals(config.mediaType)) {
+            canvasView.setMediaPreview(null);
+            return;
+        }
+        long revision = repository.revision();
+        new Thread(() -> {
+            Bitmap bitmap = null;
+            try (InputStream input = getContentResolver().openInputStream(
+                    Contract.previewUri(config.id, revision))) {
+                bitmap = BitmapFactory.decodeStream(input);
+            } catch (Throwable ignored) {
+            }
+            Bitmap result = bitmap;
+            runOnUiThread(() -> {
+                if (!isDestroyed()) canvasView.setMediaPreview(result);
+            });
+        }, "editor-preview").start();
+    }
+
+    private void addTextComponent() {
+        WidgetComponent component = new WidgetComponent();
+        component.type = WidgetComponent.TYPE_TEXT;
+        component.content = "自定义文本";
+        component.x = 60;
+        component.y = 150;
+        component.width = 320;
+        component.height = 80;
+        component.textSize = 36;
+        canvasView.addComponent(component);
+    }
+
+    private void addTimeComponent() {
+        WidgetComponent component = new WidgetComponent();
+        component.type = WidgetComponent.TYPE_TIME;
+        component.content = "HH:mm";
+        component.x = 40;
+        component.y = 64;
+        component.width = 360;
+        component.height = 110;
+        component.textSize = 58;
+        canvasView.addComponent(component);
+    }
+
+    private void addButtonComponent() {
+        if (buttonComponents().size() >= Contract.BUTTON_COUNT) {
+            Toast.makeText(this, "第一版最多支持 4 个按钮", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        WidgetComponent component = WidgetComponent.button("按钮", "package", "",
+                80, 560, 280, 80, 0);
+        canvasView.addComponent(component);
+        syncLegacyFieldsFromComponents();
+        editSelectedComponent();
+    }
+
+    private void chooseAppForSelected() {
+        WidgetComponent selected = canvasView.getSelected();
+        if (selected == null || !WidgetComponent.TYPE_BUTTON.equals(selected.type)) {
+            Toast.makeText(this, "请先点选一个按钮组件", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        startActivityForResult(new Intent(this, AppPickerActivity.class), PICK_APP);
+    }
+
+    private void duplicateSelected() {
+        WidgetComponent selected = canvasView.getSelected();
+        if (selected == null) return;
+        if (WidgetComponent.TYPE_BUTTON.equals(selected.type)
+                && buttonComponents().size() >= Contract.BUTTON_COUNT) {
+            Toast.makeText(this, "第一版最多支持 4 个按钮", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        canvasView.duplicateSelected();
+        syncLegacyFieldsFromComponents();
+    }
+
+    private void deleteSelected() {
+        WidgetComponent selected = canvasView.getSelected();
+        if (selected == null) return;
+        if (WidgetComponent.TYPE_IMAGE.equals(selected.type)
+                || WidgetComponent.TYPE_VIDEO.equals(selected.type)) {
+            clearMedia();
+            return;
+        }
+        canvasView.deleteSelected();
+        syncLegacyFieldsFromComponents();
+    }
+
+    private void editSelectedComponent() {
+        WidgetComponent component = canvasView.getSelected();
+        if (component == null) {
+            Toast.makeText(this, "请先在画布中点选组件", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(22), dp(4), dp(22), 0);
+
+        EditText content = property(panel, "内容 / 时间格式", component.content);
+        EditText color = property(panel, "颜色（例如 #FFFFFFFF）", component.color);
+        EditText textSize = property(panel, "字号", Float.toString(component.textSize));
+        EditText corner = property(panel, "圆角（画布单位）", Float.toString(component.cornerRadius));
+        EditText opacity = property(panel, "透明度（0 到 1）", Float.toString(component.opacity));
+
+        TextView fillLabel = text("图片 / 视频填充方式", 13, 0xFF666666);
+        panel.addView(fillLabel);
+        Spinner fillMode = new Spinner(this);
+        String[] fillLabels = {"裁切填满", "完整显示", "拉伸"};
+        String[] fillValues = {"cover", "contain", "stretch"};
+        fillMode.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, fillLabels));
+        fillMode.setSelection("contain".equals(component.fillMode) ? 1
+                : "stretch".equals(component.fillMode) ? 2 : 0);
+        panel.addView(fillMode, matchWrap());
+
+        TextView actionLabel = text("按钮动作", 13, 0xFF666666);
+        panel.addView(actionLabel);
+        Spinner actionType = new Spinner(this);
+        actionType.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, TYPE_LABELS));
+        actionType.setSelection(typeIndex(component.actionType));
+        panel.addView(actionType, matchWrap());
+        EditText actionValue = property(panel, "动作目标", component.actionValue);
+
+        MaterialSwitch visible = new MaterialSwitch(this);
+        visible.setText("显示组件");
+        visible.setChecked(component.visible);
+        panel.addView(visible, matchWrap());
+        MaterialSwitch locked = new MaterialSwitch(this);
+        locked.setText("锁定位置和尺寸");
+        locked.setChecked(component.locked);
+        panel.addView(locked, matchWrap());
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("组件属性 · " + componentTypeLabel(component.type))
+                .setView(panel)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("应用", (dialog, which) -> {
+                    component.content = content.getText().toString();
+                    component.color = color.getText().toString().trim();
+                    component.textSize = positiveFloat(textSize, component.textSize);
+                    component.cornerRadius = Math.max(0, floatValue(corner, component.cornerRadius));
+                    component.opacity = Math.max(0, Math.min(1, floatValue(opacity, component.opacity)));
+                    component.fillMode = fillValues[fillMode.getSelectedItemPosition()];
+                    component.actionType = TYPE_VALUES[actionType.getSelectedItemPosition()];
+                    component.actionValue = actionValue.getText().toString().trim();
+                    component.visible = visible.isChecked();
+                    component.locked = locked.isChecked();
+                    canvasView.invalidate();
+                    updateSelectionStatus(component);
+                    syncLegacyFieldsFromComponents();
+                })
+                .show();
+    }
+
+    private EditText property(LinearLayout panel, String hint, String value) {
+        EditText input = edit(hint);
+        input.setText(value);
+        panel.addView(input, matchWrap());
+        return input;
+    }
+
+    private void updateSelectionStatus(WidgetComponent component) {
+        if (selectionStatus == null) return;
+        if (component == null) {
+            selectionStatus.setText("未选择组件");
+            return;
+        }
+        selectionStatus.setText(componentTypeLabel(component.type)
+                + "  ·  " + Math.round(component.x) + "," + Math.round(component.y)
+                + "  ·  " + Math.round(component.width) + "×" + Math.round(component.height)
+                + (component.locked ? "  ·  已锁定" : ""));
+    }
+
+    private String componentTypeLabel(String type) {
+        if (WidgetComponent.TYPE_IMAGE.equals(type)) return "图片";
+        if (WidgetComponent.TYPE_VIDEO.equals(type)) return "视频";
+        if (WidgetComponent.TYPE_TIME.equals(type)) return "时间";
+        if (WidgetComponent.TYPE_BUTTON.equals(type)) return "按钮";
+        return "文本";
+    }
+
+    private ArrayList<WidgetComponent> buttonComponents() {
+        ArrayList<WidgetComponent> buttons = new ArrayList<>();
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type)) buttons.add(component);
+        }
+        buttons.sort(Comparator.comparingInt(component -> component.zIndex));
+        return buttons;
+    }
+
+    private void syncLegacyFieldsFromComponents() {
+        ArrayList<WidgetComponent> buttons = buttonComponents();
+        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
+            if (i < buttons.size()) {
+                WidgetComponent component = buttons.get(i);
+                config.labels[i] = component.content;
+                config.actionTypes[i] = component.actionType.isEmpty() ? "package" : component.actionType;
+                config.actionValues[i] = component.actionValue;
+            } else {
+                config.labels[i] = "";
+                config.actionTypes[i] = "package";
+                config.actionValues[i] = "";
+            }
+            if (labels[i] != null) labels[i].setText(config.labels[i]);
+            if (types[i] != null) types[i].setSelection(typeIndex(config.actionTypes[i]));
+            if (values[i] != null) values[i].setText(config.actionValues[i]);
+        }
+    }
+
+    private float positiveFloat(EditText input, float fallback) {
+        float value = floatValue(input, fallback);
+        return value > 0 ? value : fallback;
+    }
+
+    private float floatValue(EditText input, float fallback) {
+        try {
+            return Float.parseFloat(input.getText().toString().trim());
+        } catch (Exception ignored) {
+            return fallback;
+        }
     }
 
     private void openLsposed() {

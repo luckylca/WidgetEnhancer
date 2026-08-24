@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.List;
 
 final class WidgetConfig {
+    static final float CANVAS_WIDTH = 440f;
+    static final float CANVAS_HEIGHT = 720f;
     long repositoryRevision;
     String id = Contract.DEFAULT_WIDGET_ID;
     String name = "我的外屏";
@@ -23,6 +25,7 @@ final class WidgetConfig {
     final String[] labels = new String[Contract.BUTTON_COUNT];
     final String[] actionTypes = new String[Contract.BUTTON_COUNT];
     final String[] actionValues = new String[Contract.BUTTON_COUNT];
+    final List<WidgetComponent> components = new ArrayList<>();
 
     WidgetConfig() {
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
@@ -78,6 +81,12 @@ final class WidgetConfig {
             out.putString("button_" + i + "_type", actionTypes[i]);
             out.putString("button_" + i + "_value", actionValues[i]);
         }
+        try {
+            out.putString("components_json", componentsToJson().toString());
+        } catch (Exception error) {
+            // IPC should remain usable even if one future component type cannot be serialized.
+            out.putString("components_json", "[]");
+        }
         return out;
     }
 
@@ -96,6 +105,12 @@ final class WidgetConfig {
             c.actionTypes[i] = safe(b.getString("button_" + i + "_type"), "package");
             c.actionValues[i] = safe(b.getString("button_" + i + "_value"), "");
         }
+        JSONArray components = parseArray(b.getString("components_json"));
+        for (int i = 0; i < components.length(); i++) {
+            JSONObject item = components.optJSONObject(i);
+            if (item != null) c.components.add(WidgetComponent.fromJson(item));
+        }
+        if (c.components.isEmpty()) c.rebuildComponentsFromLegacy();
         return c;
     }
 
@@ -110,6 +125,12 @@ final class WidgetConfig {
         runtime.put("loop", loop);
         runtime.put("mute", mute);
         out.put("runtime", runtime);
+        JSONObject canvas = new JSONObject();
+        canvas.put("width", CANVAS_WIDTH);
+        canvas.put("height", CANVAS_HEIGHT);
+        canvas.put("backgroundColor", "#FF000000");
+        out.put("canvas", canvas);
+        out.put("components", componentsToJson());
         JSONArray actions = new JSONArray();
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             JSONObject action = new JSONObject();
@@ -144,7 +165,115 @@ final class WidgetConfig {
                 c.actionValues[i] = action.optString("value", "");
             }
         }
+        JSONArray components = in.optJSONArray("components");
+        if (components != null) {
+            for (int i = 0; i < components.length(); i++) {
+                JSONObject component = components.optJSONObject(i);
+                if (component != null) c.components.add(WidgetComponent.fromJson(component));
+            }
+        }
+        if (c.components.isEmpty()) c.rebuildComponentsFromLegacy();
         return c;
+    }
+
+    void rebuildComponentsFromLegacy() {
+        components.clear();
+        if (WidgetComponent.TYPE_IMAGE.equals(mediaType)
+                || WidgetComponent.TYPE_VIDEO.equals(mediaType)) {
+            components.add(WidgetComponent.media(mediaType));
+        }
+        int active = 0;
+        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
+            if (isLegacyActionActive(i)) active++;
+        }
+        if (active == 0) return;
+        float gap = 12;
+        float margin = 24;
+        float width = active == 1
+                ? CANVAS_WIDTH - margin * 2
+                : (CANVAS_WIDTH - margin * 2 - gap) / 2f;
+        int ordinal = 0;
+        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
+            if (!isLegacyActionActive(i)) continue;
+            int column = active == 1 ? 0 : ordinal % 2;
+            int row = active == 1 ? 0 : ordinal / 2;
+            float x = margin + column * (width + gap);
+            float y = CANVAS_HEIGHT - margin - 72 - row * 84;
+            components.add(WidgetComponent.button(labels[i], actionTypes[i], actionValues[i],
+                    x, y, width, 72, 100 + ordinal));
+            ordinal++;
+        }
+    }
+
+    /** Updates legacy editor fields without discarding canvas-only text/time/style changes. */
+    void mergeLegacyEditorState() {
+        WidgetComponent retainedMedia = null;
+        ArrayList<WidgetComponent> existingButtons = new ArrayList<>();
+        for (WidgetComponent component : components) {
+            if ((WidgetComponent.TYPE_IMAGE.equals(component.type)
+                    || WidgetComponent.TYPE_VIDEO.equals(component.type))
+                    && component.type.equals(mediaType) && retainedMedia == null) {
+                retainedMedia = component;
+            }
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type)) existingButtons.add(component);
+        }
+        components.removeIf(component -> WidgetComponent.TYPE_IMAGE.equals(component.type)
+                || WidgetComponent.TYPE_VIDEO.equals(component.type)
+                || WidgetComponent.TYPE_BUTTON.equals(component.type));
+        if (WidgetComponent.TYPE_IMAGE.equals(mediaType)
+                || WidgetComponent.TYPE_VIDEO.equals(mediaType)) {
+            components.add(retainedMedia == null ? WidgetComponent.media(mediaType) : retainedMedia);
+        }
+
+        int active = 0;
+        for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
+            String label = labels[i].trim();
+            String value = actionValues[i].trim();
+            if (!isLegacyActionActive(i)) continue;
+            WidgetComponent button;
+            if (active < existingButtons.size()) {
+                button = existingButtons.get(active);
+                button.content = label;
+                button.actionType = actionTypes[i];
+                button.actionValue = value;
+            } else {
+                float gap = 12;
+                float margin = 24;
+                float width = (CANVAS_WIDTH - margin * 2 - gap) / 2f;
+                int column = active % 2;
+                int row = active / 2;
+                button = WidgetComponent.button(label, actionTypes[i], value,
+                        margin + column * (width + gap),
+                        CANVAS_HEIGHT - margin - 72 - row * 84,
+                        width, 72, 100 + active);
+            }
+            components.add(button);
+            active++;
+        }
+        components.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
+    }
+
+    private boolean isLegacyActionActive(int index) {
+        if (labels[index].trim().isEmpty()) return false;
+        return !ActionSpec.requiresValue(actionTypes[index])
+                || !actionValues[index].trim().isEmpty();
+    }
+
+    private JSONArray componentsToJson() throws Exception {
+        JSONArray out = new JSONArray();
+        ArrayList<WidgetComponent> sorted = new ArrayList<>(components);
+        sorted.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
+        for (WidgetComponent component : sorted) out.put(component.toJson());
+        return out;
+    }
+
+    private static JSONArray parseArray(String value) {
+        if (value == null || value.isEmpty()) return new JSONArray();
+        try {
+            return new JSONArray(value);
+        } catch (Exception ignored) {
+            return new JSONArray();
+        }
     }
 
     WidgetConfig duplicate(String newId, String newName) {

@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-24 08:17 CST
+Last updated: 2026-08-24 08:51 CST
 
 ## DONE
 
@@ -24,18 +24,30 @@ Last updated: 2026-08-24 08:17 CST
 - Added a FlipHome content observer that rebuilds selected custom hosts and refreshes an open official settings page after repository changes.
 - Measured the real custom runtime at 335×566 inside a 335×566 host, matching FlipHome's 103dp×174dp resource at device density.
 - Built APK 0.3.1-p1 successfully and passed Android lint.
+- Added global safe mode, HyperOS compatibility/catalog/runtime/live-refresh health stages and a Material 3 status card.
+- Migrated the on-device repository from schema v1 to schema v2 without losing either user Widget, media file, enabled state or stable ID.
+- Added a 440×720 component tree for image, video, text, time and buttons, including geometry, z-index, visibility, lock, style and action records.
+- Added schema migration/round-trip/action unit tests; `testDebugUnitTest`, `lintDebug` and `assembleDebug` pass together.
+- Reworked the runtime to render component geometry and z-order while retaining the verified `TextureView` video path and visibility-aware player lifecycle.
+- Added a Material 3 visual canvas with selection, drag, resize handle, lock, layer movement, copy, delete and editable component properties.
+- Verified the visual editor on-device: the migrated image fills the canvas, selection outline works, and a new text layer renders above it without altering saved user data.
+- Added an icon/name launchable-app picker so launch actions no longer require manual package names.
+- Added typed volume, mute, flashlight and lock actions. Flashlight runs through a narrowly guarded provider bridge and requires the standard Camera permission once.
+- Added image-click handling that targets Xiaomi Gallery instead of falling through to the official host's Xiaomi Sports action.
+- All fold simulations now use cleanup traps that always reset `device_state`; every run ends with committed/base state `OPENED` and no override.
+- Built the current component-editor/action milestone as APK 0.4.0-p1; unit tests, Android lint and debug assembly pass.
 
 ## IN PROGRESS
 
-- P0: move video from the proof-of-concept `VideoView` lifecycle to a selection-aware, recoverable player.
-- P0: add safe mode and adapter compatibility checks.
-- P1: evolve schema v1 from the migrated media/action model to a canvas + component tree.
-- P1: build the visual component editor on top of the Material 3 list/editor shell.
+- P1: finish exact canvas property UX and prove saved text/time/button components on the unlocked cover runtime.
+- P1: verify volume, lock and flashlight actions from the real cover page.
+- P1: finish the gallery read-grant regression after the secure cover display is unlocked.
 
 ## FAILED
 
 - Android 16 rejects ordinary ADB and instrumentation key injection. Repeatable touch automation now uses Monkey script pointer events instead.
 - A first persistence check force-stopped FlipHome before confirming the Activity had stopped; a corrected Back/touch + wait + cold-start test passed.
+- Android 16 prevents automated acceptance of runtime permission dialogs. The standard Camera prompt therefore requires one physical tap by the user.
 
 ## BLOCKED
 
@@ -43,8 +55,8 @@ Last updated: 2026-08-24 08:17 CST
 
 ## TODO NEXT
 
-1. Add provider content observation and live runtime refresh without restarting FlipHome.
-2. Introduce canvas/component records for image, video, text, time and button layers.
-3. Add safe mode plus Hook adapter compatibility checks.
-4. Replace the proof-of-concept video lifecycle with a visibility-aware player controller.
-5. Complete pixel-level image/video regression on an unlocked cover session.
+1. Physically approve the Camera prompt, run the auto-restoring flashlight diagnostic and record the result.
+2. Save a temporary text/time/button composition, verify it on the unlocked cover, then restore the user's original records.
+3. Verify gallery open/read, volume and lock actions on the cover page.
+4. Complete repeated official ↔ custom ↔ official swipe regression.
+5. Begin the MediaSession/lyrics provider layer after P1 device gates pass.

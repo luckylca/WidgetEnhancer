@@ -11,6 +11,7 @@ test/logs/diagnostics-*/
 test/screenshots/*.png
 test/screenshots/*.jpg
 test/screenshots/*.mp4
+test/device-backup/
 reverse/decompiled/
 reverse/tmp/
 reverse/apks/
