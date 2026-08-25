@@ -3,11 +3,9 @@ package com.lucky.mixflipouter;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
-import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Shader;
@@ -22,7 +20,7 @@ import java.util.Locale;
 final class PreviewRenderer {
     private static final int WIDTH = 440;
     private static final int HEIGHT = 720;
-    private static final int RENDER_VERSION = 6;
+    private static final int RENDER_VERSION = 7;
 
     static File ensure(Context context, WidgetConfig config, File media, long revision) {
         String id = config == null ? "missing" : safeFilePart(config.id);
@@ -58,16 +56,16 @@ final class PreviewRenderer {
 
         if (source != null) {
             Paint media = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-            BitmapShader shader = new BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            Matrix transform = new Matrix();
-            float scale = Math.max(WIDTH / (float) source.getWidth(), HEIGHT / (float) source.getHeight());
-            float left = (WIDTH - source.getWidth() * scale) / 2f;
-            float top = (HEIGHT - source.getHeight() * scale) / 2f;
-            transform.setScale(scale, scale);
-            transform.postTranslate(left, top);
-            shader.setLocalMatrix(transform);
-            media.setShader(shader);
+            media.setColor(Color.BLACK);
             canvas.drawPath(shape, media);
+            WidgetComponent component = mediaComponent(config);
+            if (component == null) component = WidgetComponent.media(config.mediaType);
+            int save = canvas.save();
+            canvas.clipPath(shape);
+            canvas.drawBitmap(source, MediaTransform.bitmapMatrix(
+                    source.getWidth(), source.getHeight(),
+                    new android.graphics.RectF(0, 0, WIDTH, HEIGHT), component), media);
+            canvas.restoreToCount(save);
         } else if (config != null && WidgetTypeRegistry.SHORTCUTS.equals(
                 WidgetTypeRegistry.resolve(config))) {
             drawPlaceholder(context, canvas, config);
@@ -124,6 +122,15 @@ final class PreviewRenderer {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    private static WidgetComponent mediaComponent(WidgetConfig config) {
+        if (config == null) return null;
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_IMAGE.equals(component.type)
+                    || WidgetComponent.TYPE_VIDEO.equals(component.type)) return component;
+        }
+        return null;
     }
 
     private static void drawPlaceholder(Context context, Canvas canvas, WidgetConfig config) {

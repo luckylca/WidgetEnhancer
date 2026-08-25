@@ -148,6 +148,11 @@ final class WidgetPackage {
             component.textSize = clamp(component.textSize, 1, 200);
             component.zIndex = Math.max(-10_000, Math.min(10_000, component.zIndex));
             component.fillMode = knownFillMode(component.fillMode) ? component.fillMode : "cover";
+            component.mediaRotation = component.mediaRotation == 90 ? 90 : 0;
+            component.mediaScale = finiteClamp(component.mediaScale,
+                    1, MediaTransform.MAX_USER_SCALE, 1);
+            component.mediaOffsetX = finiteClamp(component.mediaOffsetX, -1, 1, 0);
+            component.mediaOffsetY = finiteClamp(component.mediaOffsetY, -1, 1, 0);
             component.textAlign = knownTextAlign(component.textAlign) ? component.textAlign : "center";
             component.color = validColor(component.color) ? component.color : "#FFFFFFFF";
             component.content = bounded(component.content, 500);
@@ -171,6 +176,10 @@ final class WidgetPackage {
                 || WidgetComponent.TYPE_LYRIC_NEXT.equals(type)
                 || WidgetComponent.TYPE_PLAYBACK_PROGRESS.equals(type)
                 || WidgetComponent.TYPE_ALBUM_ART.equals(type);
+    }
+
+    private static float finiteClamp(float value, float min, float max, float fallback) {
+        return Float.isFinite(value) ? clamp(value, min, max) : fallback;
     }
 
     private static boolean isMedia(String type) {

@@ -225,7 +225,7 @@ final class WidgetConfig {
         for (WidgetComponent component : components) {
             if ((WidgetComponent.TYPE_IMAGE.equals(component.type)
                     || WidgetComponent.TYPE_VIDEO.equals(component.type))
-                    && component.type.equals(mediaType) && retainedMedia == null) {
+                    && retainedMedia == null) {
                 retainedMedia = component;
             }
             if (WidgetComponent.TYPE_BUTTON.equals(component.type)) existingButtons.add(component);
@@ -235,7 +235,9 @@ final class WidgetConfig {
                 || WidgetComponent.TYPE_BUTTON.equals(component.type));
         if (WidgetComponent.TYPE_IMAGE.equals(mediaType)
                 || WidgetComponent.TYPE_VIDEO.equals(mediaType)) {
-            components.add(retainedMedia == null ? WidgetComponent.media(mediaType) : retainedMedia);
+            if (retainedMedia == null) retainedMedia = WidgetComponent.media(mediaType);
+            retainedMedia.type = mediaType;
+            components.add(retainedMedia);
         }
 
         int active = 0;
@@ -272,7 +274,7 @@ final class WidgetConfig {
         for (WidgetComponent component : components) {
             if ((WidgetComponent.TYPE_IMAGE.equals(component.type)
                     || WidgetComponent.TYPE_VIDEO.equals(component.type))
-                    && component.type.equals(mediaType) && retainedMedia == null) {
+                    && retainedMedia == null) {
                 retainedMedia = component;
             }
         }
@@ -280,7 +282,9 @@ final class WidgetConfig {
                 || WidgetComponent.TYPE_VIDEO.equals(component.type));
         if (WidgetComponent.TYPE_IMAGE.equals(mediaType)
                 || WidgetComponent.TYPE_VIDEO.equals(mediaType)) {
-            components.add(retainedMedia == null ? WidgetComponent.media(mediaType) : retainedMedia);
+            if (retainedMedia == null) retainedMedia = WidgetComponent.media(mediaType);
+            retainedMedia.type = mediaType;
+            components.add(retainedMedia);
         }
         components.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
     }

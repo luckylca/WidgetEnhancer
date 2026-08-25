@@ -31,6 +31,10 @@ final class WidgetComponent {
     float opacity = 1f;
     float cornerRadius;
     String fillMode = "cover";
+    int mediaRotation;
+    float mediaScale = 1f;
+    float mediaOffsetX;
+    float mediaOffsetY;
     String content = "";
     String color = "#FFFFFFFF";
     float textSize = 28f;
@@ -80,6 +84,12 @@ final class WidgetComponent {
         style.put("opacity", opacity);
         style.put("cornerRadius", cornerRadius);
         style.put("fillMode", fillMode);
+        if (TYPE_IMAGE.equals(type) || TYPE_VIDEO.equals(type)) {
+            style.put("mediaRotation", mediaRotation);
+            style.put("mediaScale", mediaScale);
+            style.put("mediaOffsetX", mediaOffsetX);
+            style.put("mediaOffsetY", mediaOffsetY);
+        }
         style.put("color", color);
         style.put("textSize", textSize);
         style.put("textAlign", textAlign);
@@ -113,6 +123,13 @@ final class WidgetComponent {
             component.opacity = clamp((float) style.optDouble("opacity", 1), 0, 1);
             component.cornerRadius = Math.max(0, (float) style.optDouble("cornerRadius", 0));
             component.fillMode = safe(style.optString("fillMode", null), "cover");
+            component.mediaRotation = style.optInt("mediaRotation", 0) == 90 ? 90 : 0;
+            component.mediaScale = finiteClamp(
+                    (float) style.optDouble("mediaScale", 1), 1, MediaTransform.MAX_USER_SCALE, 1);
+            component.mediaOffsetX = finiteClamp(
+                    (float) style.optDouble("mediaOffsetX", 0), -1, 1, 0);
+            component.mediaOffsetY = finiteClamp(
+                    (float) style.optDouble("mediaOffsetY", 0), -1, 1, 0);
             component.color = safe(style.optString("color", null), "#FFFFFFFF");
             component.textSize = positive((float) style.optDouble("textSize", 28), 28);
             component.textAlign = safe(style.optString("textAlign", null), "center");
@@ -138,6 +155,10 @@ final class WidgetComponent {
 
     private static float clamp(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static float finiteClamp(float value, float min, float max, float fallback) {
+        return Float.isFinite(value) ? clamp(value, min, max) : fallback;
     }
 
     private static float positive(float value, float fallback) {

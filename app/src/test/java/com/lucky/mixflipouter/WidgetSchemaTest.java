@@ -30,6 +30,72 @@ public final class WidgetSchemaTest {
     }
 
     @Test
+    public void mediaTransformRoundTripPreservesCrop() throws Exception {
+        WidgetComponent source = WidgetComponent.media(WidgetComponent.TYPE_VIDEO);
+        source.mediaRotation = 90;
+        source.mediaScale = 2.4f;
+        source.mediaOffsetX = -0.35f;
+        source.mediaOffsetY = 0.72f;
+
+        WidgetComponent restored = WidgetComponent.fromJson(source.toJson());
+
+        assertEquals(90, restored.mediaRotation);
+        assertEquals(2.4f, restored.mediaScale, 0.001f);
+        assertEquals(-0.35f, restored.mediaOffsetX, 0.001f);
+        assertEquals(0.72f, restored.mediaOffsetY, 0.001f);
+    }
+
+    @Test
+    public void legacyMediaDefaultsToCenteredCover() throws Exception {
+        WidgetComponent restored = WidgetComponent.fromJson(new JSONObject()
+                .put("type", WidgetComponent.TYPE_IMAGE));
+
+        assertEquals(0, restored.mediaRotation);
+        assertEquals(1f, restored.mediaScale, 0.001f);
+        assertEquals(0f, restored.mediaOffsetX, 0.001f);
+        assertEquals(0f, restored.mediaOffsetY, 0.001f);
+    }
+
+    @Test
+    public void mediaTransformCalculatesCoverAndBoundedPan() {
+        MediaTransform.Spec portrait = MediaTransform.calculate(
+                1600, 900, 440, 720, 0, 1, 2, -2);
+        assertEquals(720f, portrait.scaledHeight, 0.001f);
+        assertTrue(portrait.scaledWidth > 440f);
+        assertEquals(portrait.maxPanX, portrait.panX, 0.001f);
+        assertEquals(0f, portrait.panY, 0.001f);
+
+        MediaTransform.Spec rotated = MediaTransform.calculate(
+                1600, 900, 440, 720, 90, 2, 0.5f, -0.5f);
+        assertEquals(90, rotated.rotation);
+        assertTrue(rotated.scaledWidth >= 440f);
+        assertTrue(rotated.scaledHeight >= 720f);
+        assertEquals(rotated.maxPanX * 0.5f, rotated.panX, 0.001f);
+        assertEquals(rotated.maxPanY * -0.5f, rotated.panY, 0.001f);
+    }
+
+    @Test
+    public void mediaLayoutRebuildKeepsTransformWhenKindChanges() {
+        WidgetConfig config = new WidgetConfig();
+        config.typeId = WidgetTypeRegistry.MEDIA;
+        config.mediaType = WidgetComponent.TYPE_IMAGE;
+        WidgetComponent media = WidgetComponent.media(WidgetComponent.TYPE_IMAGE);
+        media.mediaRotation = 90;
+        media.mediaScale = 3f;
+        media.mediaOffsetX = 0.4f;
+        config.components.add(media);
+
+        config.mediaType = WidgetComponent.TYPE_VIDEO;
+        WidgetTypeRegistry.buildMediaLayout(config);
+
+        assertEquals(1, config.components.size());
+        assertEquals(WidgetComponent.TYPE_VIDEO, config.components.get(0).type);
+        assertEquals(90, config.components.get(0).mediaRotation);
+        assertEquals(3f, config.components.get(0).mediaScale, 0.001f);
+        assertEquals(0.4f, config.components.get(0).mediaOffsetX, 0.001f);
+    }
+
+    @Test
     public void legacyWidgetMigratesMediaAndButtonsIntoComponents() throws Exception {
         JSONObject legacy = new JSONObject();
         legacy.put("id", "legacy");
@@ -104,7 +170,11 @@ public final class WidgetSchemaTest {
     @Test
     public void mediaReplacementPreservesUnlimitedCanvasButtons() {
         WidgetConfig config = new WidgetConfig();
-        config.components.add(WidgetComponent.media(WidgetComponent.TYPE_IMAGE));
+        WidgetComponent media = WidgetComponent.media(WidgetComponent.TYPE_IMAGE);
+        media.mediaRotation = 90;
+        media.mediaScale = 2f;
+        media.mediaOffsetY = 0.5f;
+        config.components.add(media);
         for (int index = 0; index < 6; index++) {
             config.components.add(WidgetComponent.button("按钮" + index, ActionSpec.VOLUME_UP,
                     "", 10, 20 + index * 30, 120, 60, index + 1));
@@ -120,6 +190,12 @@ public final class WidgetSchemaTest {
                 WidgetComponent.TYPE_VIDEO.equals(component.type)));
         assertFalse(config.components.stream().anyMatch(component ->
                 WidgetComponent.TYPE_IMAGE.equals(component.type)));
+        WidgetComponent replaced = config.components.stream().filter(component ->
+                WidgetComponent.TYPE_VIDEO.equals(component.type)).findFirst()
+                .orElseThrow(AssertionError::new);
+        assertEquals(90, replaced.mediaRotation);
+        assertEquals(2f, replaced.mediaScale, 0.001f);
+        assertEquals(0.5f, replaced.mediaOffsetY, 0.001f);
     }
 
     @Test
@@ -453,6 +529,10 @@ public final class WidgetSchemaTest {
         button.color = "not-a-color";
         button.fillMode = "future-mode";
         button.textAlign = "diagonal";
+        button.mediaRotation = 270;
+        button.mediaScale = Float.POSITIVE_INFINITY;
+        button.mediaOffsetX = -8;
+        button.mediaOffsetY = Float.NaN;
         config.components.add(button);
 
         WidgetPackage.sanitize(config, false);
@@ -465,6 +545,10 @@ public final class WidgetSchemaTest {
         assertEquals("#FFFFFFFF", button.color);
         assertEquals("cover", button.fillMode);
         assertEquals("center", button.textAlign);
+        assertEquals(0, button.mediaRotation);
+        assertEquals(1f, button.mediaScale, 0.001f);
+        assertEquals(-1f, button.mediaOffsetX, 0.001f);
+        assertEquals(0f, button.mediaOffsetY, 0.001f);
         assertEquals(10_000, button.zIndex);
     }
 }

@@ -6,7 +6,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.MotionEvent;
 import android.view.View;
@@ -318,30 +317,9 @@ final class WidgetCanvasView extends View {
         } else {
             canvas.clipRect(destination);
         }
-        Rect source = new Rect(0, 0, mediaPreview.getWidth(), mediaPreview.getHeight());
-        RectF target = mediaTarget(new RectF(source), destination, component.fillMode);
-        canvas.drawBitmap(mediaPreview, source, target, paint);
+        canvas.drawBitmap(mediaPreview, MediaTransform.bitmapMatrix(
+                mediaPreview.getWidth(), mediaPreview.getHeight(), destination, component), paint);
         canvas.restoreToCount(save);
-    }
-
-    private RectF mediaTarget(RectF source, RectF destination, String fillMode) {
-        if ("stretch".equals(fillMode)) return new RectF(destination);
-        float sourceAspect = source.width() / source.height();
-        float targetAspect = destination.width() / destination.height();
-        boolean contain = "contain".equals(fillMode);
-        float width;
-        float height;
-        if ((sourceAspect > targetAspect) == contain) {
-            width = destination.width();
-            height = width / sourceAspect;
-        } else {
-            height = destination.height();
-            width = height * sourceAspect;
-        }
-        float centerX = destination.centerX();
-        float centerY = destination.centerY();
-        return new RectF(centerX - width / 2, centerY - height / 2,
-                centerX + width / 2, centerY + height / 2);
     }
 
     private void drawText(Canvas canvas, RectF rect, WidgetComponent component, String value) {

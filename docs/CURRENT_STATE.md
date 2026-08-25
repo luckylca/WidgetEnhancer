@@ -1,6 +1,6 @@
 # Current state
 
-Last synchronized with `STATUS.md`: 2026-08-24 20:05 CST.
+Last synchronized: 2026-08-25 21:25 CST.
 
 ## Product identity
 
@@ -8,7 +8,7 @@ Last synchronized with `STATUS.md`: 2026-08-24 20:05 CST.
 - Required LSPosed scope: `com.miui.fliphome`
 - Optional scopes: `com.netease.cloudmusic` for the native structured-lyric source and `com.android.systemui` for the advanced QS adapter
 - Baseline: MIX Flip 1 (`ruyi`), HyperOS `OS3.0.303.0.WNICNXM`, Android 16
-- Current build: `0.6.5-p1` (versionCode 12)
+- Current build: `0.6.9-p1` (versionCode 16)
 - MixFlipMod remains reverse-engineering reference material only
 
 ## Implemented product path
@@ -21,7 +21,10 @@ shortcut Widgets, but does not impose a three-type limit. Adding a later outer-s
 registering a new type and supplying its own editor, fixed semantic layout and runtime behavior.
 
 The normal user flow no longer exposes the internal component canvas, templates, arbitrary
-positioning or advanced styling. Media selects one image or video and controls video loop/mute.
+positioning or advanced styling. Media selects one image or video, supports portrait/landscape
+rotation, and uses a fixed output frame for direct pan and pinch zoom. Video editing uses the first
+frame; the saved crop is shared by catalogue preview and image/video runtime. Video loop/mute remain
+the only playback settings.
 Music uses a full-screen blurred album-art background, shows lyrics by default and maps single tap
 to play/pause, upper-half double tap to previous, lower-half double tap to next, upper-half long
 press to repeatedly raise volume, and lower-half long press to repeatedly lower volume until the
@@ -45,6 +48,8 @@ Common controls use direct semantic actions: app/URI/broadcast launch, volume, m
 
 - Two user Widgets appear dynamically in the official `自定义` group and build real runtime hosts.
 - Image and video rendering, official sizing/corners, component composition, flashlight diagnostics and package import/export have physical-device evidence.
+- Shared image/video crop transforms are device-proven with portrait/landscape editor renders and
+  transformed image/video runtime captures; the temporary test video was removed afterward.
 - Notification-listener access is granted and Android binds `PlaybackNotificationListener`; NetEase exposes a real MediaSession.
 - NetEase and SystemUI optional LSPosed scopes are selected. A restarted NetEase process logged successful lyric-adapter installation.
 - Do Not Disturb and auto-rotate direct actions were toggled and automatically restored while their underlying system values were sampled through ADB.
@@ -60,7 +65,7 @@ Common controls use direct semantic actions: app/URI/broadcast launch, volume, m
 - MediaSession discovery now has a Provider-owned one-second system rescan fallback. A physical
   reinstall reproduced HyperOS leaving the notification listener disconnected; without manually
   rebinding it, the fallback recovered the playing NetEase session and its cached 58-line lyric.
-- 44 unit tests, Debug Lint, Debug assembly and Release assembly pass.
+- 48 unit tests, Debug Lint, Debug assembly and Release assembly pass.
 
 ## Remaining acceptance work
 

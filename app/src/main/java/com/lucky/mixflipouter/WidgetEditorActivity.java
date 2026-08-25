@@ -7,7 +7,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
-import android.graphics.drawable.ColorDrawable;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -22,9 +22,11 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
 
+import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -59,7 +61,9 @@ public final class WidgetEditorActivity extends Activity {
     private MaterialSwitch loopSwitch;
     private MaterialSwitch muteSwitch;
     private TextView mediaStatus;
-    private ImageView mediaPreview;
+    private MediaCropView mediaPreview;
+    private MaterialButton portraitButton;
+    private MaterialButton landscapeButton;
     private LinearLayout shortcutList;
     private FrameLayout shortcutPreviewHolder;
     private ScrollView scroll;
@@ -141,12 +145,25 @@ public final class WidgetEditorActivity extends Activity {
 
     private void createMediaEditor(LinearLayout root) {
         section(root, "媒体");
-        FrameLayout previewHolder = new FrameLayout(this);
-        previewHolder.setBackgroundColor(0xFF17181D);
-        mediaPreview = new ImageView(this);
-        mediaPreview.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        previewHolder.addView(mediaPreview, new FrameLayout.LayoutParams(-1, -1));
-        root.addView(previewHolder, new LinearLayout.LayoutParams(-1, dp(360)));
+        mediaPreview = new MediaCropView(this);
+        mediaPreview.setComponent(mediaComponent());
+        root.addView(mediaPreview, new LinearLayout.LayoutParams(-1, dp(420)));
+
+        section(root, "显示方向");
+        MaterialButtonToggleGroup direction = new MaterialButtonToggleGroup(this);
+        direction.setSingleSelection(true);
+        direction.setSelectionRequired(true);
+        portraitButton = outlinedButton("竖屏", v -> setMediaRotation(0));
+        portraitButton.setId(View.generateViewId());
+        portraitButton.setCheckable(true);
+        landscapeButton = outlinedButton("横屏", v -> setMediaRotation(90));
+        landscapeButton.setId(View.generateViewId());
+        landscapeButton.setCheckable(true);
+        direction.addView(portraitButton, weighted());
+        direction.addView(landscapeButton, weighted());
+        root.addView(direction, matchWrap());
+        updateDirectionButtons();
+        root.addView(textButton("重置位置与缩放", v -> mediaPreview.resetTransform()), matchWrap());
 
         mediaStatus = text("尚未选择媒体", 14,
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
@@ -434,6 +451,9 @@ public final class WidgetEditorActivity extends Activity {
             config.mimeType = mime == null
                     ? (WidgetComponent.TYPE_IMAGE.equals(kind) ? "image/*" : "video/*") : mime;
             WidgetTypeRegistry.buildMediaLayout(config);
+            mediaPreview.setBitmap(null);
+            mediaPreview.setComponent(mediaComponent());
+            updateDirectionButtons();
             repository.save(config);
             updateMediaStatus();
             loadMediaPreview();
@@ -446,7 +466,11 @@ public final class WidgetEditorActivity extends Activity {
         config.mimeType = "application/octet-stream";
         WidgetTypeRegistry.buildMediaLayout(config);
         repository.save(config);
-        if (mediaPreview != null) mediaPreview.setImageDrawable(new ColorDrawable(0xFF17181D));
+        if (mediaPreview != null) {
+            mediaPreview.setComponent(null);
+            mediaPreview.setBitmap(null);
+        }
+        updateDirectionButtons();
         updateMediaStatus();
     }
 
@@ -462,13 +486,90 @@ public final class WidgetEditorActivity extends Activity {
 
     private void loadMediaPreview() {
         if (mediaPreview == null || "none".equals(config.mediaType)) return;
-        long revision = repository.revision();
+        String expectedType = config.mediaType;
         new Thread(() -> {
-            Bitmap bitmap = loadBitmap(Contract.previewUri(config.id, revision));
+            Bitmap bitmap = loadMediaSource(expectedType);
             runOnUiThread(() -> {
-                if (!isDestroyed() && bitmap != null) mediaPreview.setImageBitmap(bitmap);
+                if (!isDestroyed() && expectedType.equals(config.mediaType) && bitmap != null) {
+                    mediaPreview.setComponent(mediaComponent());
+                    mediaPreview.setBitmap(bitmap);
+                } else if (bitmap != null && !bitmap.isRecycled()) {
+                    bitmap.recycle();
+                }
             });
         }, "editor-media-preview").start();
+    }
+
+    private Bitmap loadMediaSource(String mediaType) {
+        File media = repository.mediaFile(config.id);
+        if (!media.isFile()) return null;
+        if (WidgetComponent.TYPE_VIDEO.equals(mediaType)) {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(media.getAbsolutePath());
+                int width = metadataDimension(retriever,
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+                int height = metadataDimension(retriever,
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+                Bitmap scaled = null;
+                if (width > 0 && height > 0) {
+                    float sample = Math.min(1f, Math.min(1760f / width, 2880f / height));
+                    scaled = retriever.getScaledFrameAtTime(0,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            Math.max(1, Math.round(width * sample)),
+                            Math.max(1, Math.round(height * sample)));
+                }
+                return scaled != null ? scaled
+                        : retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            } catch (Throwable ignored) {
+                return null;
+            } finally {
+                try {
+                    retriever.release();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(media.getAbsolutePath(), bounds);
+        int sample = 1;
+        while (bounds.outWidth / sample > 1760 || bounds.outHeight / sample > 2880) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        return BitmapFactory.decodeFile(media.getAbsolutePath(), options);
+    }
+
+    private int metadataDimension(MediaMetadataRetriever retriever, int key) {
+        try {
+            return Math.max(0, Integer.parseInt(retriever.extractMetadata(key)));
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private WidgetComponent mediaComponent() {
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_IMAGE.equals(component.type)
+                    || WidgetComponent.TYPE_VIDEO.equals(component.type)) return component;
+        }
+        return null;
+    }
+
+    private void setMediaRotation(int rotation) {
+        if (mediaPreview == null || mediaComponent() == null) return;
+        mediaPreview.setMediaRotation(rotation);
+        updateDirectionButtons();
+    }
+
+    private void updateDirectionButtons() {
+        if (portraitButton == null || landscapeButton == null) return;
+        WidgetComponent component = mediaComponent();
+        boolean landscape = component != null && component.mediaRotation == 90;
+        portraitButton.setChecked(!landscape);
+        landscapeButton.setChecked(landscape);
+        portraitButton.setEnabled(component != null);
+        landscapeButton.setEnabled(component != null);
     }
 
     private void loadPlaybackArtwork(ImageView view) {

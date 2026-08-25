@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 
 /** Debug-only ADB bridge for device tests that cannot rely on vendor input injection. */
 public final class DeviceTestActivity extends Activity {
+    private static final String DEBUG_MEDIA_ROTATION = "debug_media_rotation";
     public static final String ACTION_DUMP_DIAGNOSTICS =
             "com.lucky.mixflipouter.debug.DUMP_DIAGNOSTICS";
     public static final String ACTION_MEDIA_PLAY_PAUSE =
@@ -47,16 +48,44 @@ public final class DeviceTestActivity extends Activity {
         setShowWhenLocked(true);
         setTurnScreenOn(true);
         if (ACTION_OPEN_RUNTIME_WIDGET.equals(getIntent().getAction())) {
+            String widgetId = getIntent().getStringExtra(Contract.EXTRA_WIDGET_ID);
             WidgetConfig config = new WidgetRepository(this).get(
-                    getIntent().getStringExtra(Contract.EXTRA_WIDGET_ID));
+                    widgetId);
+            if (config == null && "debug-video".equals(widgetId)) {
+                config = new WidgetConfig();
+                config.id = widgetId;
+                config.typeId = WidgetTypeRegistry.MEDIA;
+                config.mediaType = WidgetComponent.TYPE_VIDEO;
+                config.mimeType = "video/mp4";
+                WidgetTypeRegistry.buildMediaLayout(config);
+            }
             if (config != null) {
+                for (WidgetComponent component : config.components) {
+                    if (!WidgetComponent.TYPE_IMAGE.equals(component.type)
+                            && !WidgetComponent.TYPE_VIDEO.equals(component.type)) continue;
+                    int rotation = getIntent().getIntExtra(DEBUG_MEDIA_ROTATION, -1);
+                    if (rotation >= 0) component.mediaRotation = rotation == 90 ? 90 : 0;
+                    if (getIntent().hasExtra("debug_media_scale")) {
+                        component.mediaScale = getIntent().getFloatExtra("debug_media_scale", 1f);
+                    }
+                    if (getIntent().hasExtra("debug_media_offset_x")) {
+                        component.mediaOffsetX = getIntent().getFloatExtra(
+                                "debug_media_offset_x", 0f);
+                    }
+                    if (getIntent().hasExtra("debug_media_offset_y")) {
+                        component.mediaOffsetY = getIntent().getFloatExtra(
+                                "debug_media_offset_y", 0f);
+                    }
+                    break;
+                }
                 getWindow().getDecorView().setSystemUiVisibility(
                         android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
                                 | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                                 | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
                 MediaWidgetView widget = new MediaWidgetView(this, config);
                 setContentView(widget);
-                widget.postDelayed(() -> captureRuntimeWidget(widget, config.id), 2_500L);
+                String captureId = config.id;
+                widget.postDelayed(() -> captureRuntimeWidget(widget, captureId), 2_500L);
                 return;
             }
             finish();
@@ -307,7 +336,22 @@ public final class DeviceTestActivity extends Activity {
             Bitmap bitmap = Bitmap.createBitmap(
                     width, height,
                     Bitmap.Config.ARGB_8888);
-            widget.draw(new Canvas(bitmap));
+            Canvas canvas = new Canvas(bitmap);
+            widget.draw(canvas);
+            for (int index = 0; index < widget.getChildCount(); index++) {
+                android.view.View child = widget.getChildAt(index);
+                if (!(child instanceof android.view.TextureView)) continue;
+                Bitmap texture = ((android.view.TextureView) child).getBitmap(
+                        Math.max(1, child.getWidth()), Math.max(1, child.getHeight()));
+                if (texture != null) {
+                    int save = canvas.save();
+                    canvas.translate(child.getLeft(), child.getTop());
+                    canvas.concat(((android.view.TextureView) child).getTransform(null));
+                    canvas.drawBitmap(texture, 0, 0, null);
+                    canvas.restoreToCount(save);
+                    texture.recycle();
+                }
+            }
             File output = new File(outputDirectory, "runtime-" + widgetId + ".png");
             try (FileOutputStream stream = new FileOutputStream(output, false)) {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);

@@ -76,10 +76,25 @@ final class WidgetTypeRegistry {
     }
 
     static void buildMediaLayout(WidgetConfig config) {
+        WidgetComponent retained = null;
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_IMAGE.equals(component.type)
+                    || WidgetComponent.TYPE_VIDEO.equals(component.type)) {
+                retained = component;
+                break;
+            }
+        }
         config.components.clear();
         if (WidgetComponent.TYPE_IMAGE.equals(config.mediaType)
                 || WidgetComponent.TYPE_VIDEO.equals(config.mediaType)) {
-            config.components.add(WidgetComponent.media(config.mediaType));
+            if (retained == null) retained = WidgetComponent.media(config.mediaType);
+            retained.type = config.mediaType;
+            retained.x = 0;
+            retained.y = 0;
+            retained.width = WidgetConfig.CANVAS_WIDTH;
+            retained.height = WidgetConfig.CANVAS_HEIGHT;
+            retained.zIndex = 0;
+            config.components.add(retained);
         }
     }
 

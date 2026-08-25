@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.RectF;
@@ -40,6 +39,8 @@ import android.widget.Toast;
 import android.view.ViewConfiguration;
 import android.view.ViewParent;
 
+import androidx.appcompat.widget.AppCompatImageView;
+
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -70,6 +71,7 @@ final class MediaWidgetView extends FrameLayout {
     private boolean volumeRepeatActive;
     private String repeatingVolumeAction;
     private TextureView videoTexture;
+    private WidgetComponent videoComponent;
     private MediaPlayer mediaPlayer;
     private boolean playerPrepared;
     private int videoWidth;
@@ -195,14 +197,15 @@ final class MediaWidgetView extends FrameLayout {
             return artwork;
         }
         if (WidgetComponent.TYPE_IMAGE.equals(component.type)) {
-            ImageView image = new ImageView(getContext());
-            image.setScaleType(imageScaleType(component.fillMode));
-            image.post(() -> image.setImageBitmap(loadScaledBitmap(Math.max(getWidth(), 1208), Math.max(getHeight(), 1392))));
+            CroppedImageView image = new CroppedImageView(getContext(), component);
+            image.post(() -> image.setImageBitmap(loadScaledBitmap(
+                    Math.max(getWidth(), 1208), Math.max(getHeight(), 1392))));
             return image;
         }
         if (WidgetComponent.TYPE_VIDEO.equals(component.type)) {
             if (videoTexture != null) return null;
             videoTexture = new TextureView(getContext());
+            videoComponent = component;
             videoTexture.setOpaque(true);
             videoTexture.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override
@@ -364,14 +367,9 @@ final class MediaWidgetView extends FrameLayout {
 
     private void updateVideoTransform(int viewWidth, int viewHeight) {
         if (videoTexture == null || viewWidth <= 0 || viewHeight <= 0
-                || videoWidth <= 0 || videoHeight <= 0) return;
-        float viewAspect = viewWidth / (float) viewHeight;
-        float videoAspect = videoWidth / (float) videoHeight;
-        float scaleX = videoAspect > viewAspect ? videoAspect / viewAspect : 1f;
-        float scaleY = videoAspect < viewAspect ? viewAspect / videoAspect : 1f;
-        Matrix transform = new Matrix();
-        transform.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f);
-        videoTexture.setTransform(transform);
+                || videoWidth <= 0 || videoHeight <= 0 || videoComponent == null) return;
+        videoTexture.setTransform(MediaTransform.textureMatrix(videoWidth, videoHeight,
+                viewWidth, viewHeight, videoComponent));
     }
 
     private void maybePlay() {
@@ -962,6 +960,36 @@ final class MediaWidgetView extends FrameLayout {
         AlbumBinding(ImageView view, boolean blur) {
             this.view = view;
             this.blur = blur;
+        }
+    }
+
+    private static final class CroppedImageView extends AppCompatImageView {
+        private final WidgetComponent component;
+        private Bitmap bitmap;
+
+        CroppedImageView(Context context, WidgetComponent component) {
+            super(context);
+            this.component = component;
+            setScaleType(ScaleType.MATRIX);
+        }
+
+        @Override
+        public void setImageBitmap(Bitmap bitmap) {
+            this.bitmap = bitmap;
+            super.setImageBitmap(bitmap);
+            applyTransform();
+        }
+
+        @Override
+        protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight);
+            applyTransform();
+        }
+
+        private void applyTransform() {
+            if (bitmap == null || getWidth() <= 0 || getHeight() <= 0) return;
+            setImageMatrix(MediaTransform.bitmapMatrix(bitmap.getWidth(), bitmap.getHeight(),
+                    new RectF(0, 0, getWidth(), getHeight()), component));
         }
     }
 
