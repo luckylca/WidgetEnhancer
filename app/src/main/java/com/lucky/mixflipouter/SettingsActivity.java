@@ -1,16 +1,12 @@
 package com.lucky.mixflipouter;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
@@ -31,13 +27,10 @@ import java.io.InputStream;
 import java.util.List;
 
 public final class SettingsActivity extends Activity {
-    private static final int REQUEST_CAMERA_FOR_TORCH = 2101;
     private static final int REQUEST_IMPORT_WIDGET = 3101;
     private WidgetRepository repository;
     private LinearLayout widgetList;
     private TextView countText;
-    private TextView hookStatus;
-    private MaterialSwitch safeModeSwitch;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -51,7 +44,6 @@ public final class SettingsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         renderWidgets();
-        updateHookStatus();
     }
 
     private View createContent() {
@@ -62,7 +54,7 @@ public final class SettingsActivity extends Activity {
         scroll.setFillViewport(true);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(20), dp(20), dp(40));
+        root.setPadding(dp(20), dp(20), dp(20), dp(104));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         page.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
 
@@ -82,8 +74,6 @@ public final class SettingsActivity extends Activity {
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         root.addView(subtitle);
 
-        root.addView(createSystemCard(), marginTop(dp(20)));
-
         LinearLayout sectionTitle = horizontal();
         TextView mine = text("我的小部件", 21,
                 color(com.google.android.material.R.attr.colorOnSurface));
@@ -92,7 +82,7 @@ public final class SettingsActivity extends Activity {
         countText = text("0 个", 14,
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         sectionTitle.addView(countText);
-        root.addView(sectionTitle, marginTop(dp(26)));
+        root.addView(sectionTitle, marginTop(dp(28)));
 
         LinearLayout libraryActions = horizontal();
         MaterialButton create = outlinedButton("添加小部件", v -> showCreateDialog());
@@ -109,91 +99,11 @@ public final class SettingsActivity extends Activity {
         listParams.topMargin = dp(12);
         root.addView(widgetList, listParams);
 
+        FrameLayout.LayoutParams navigationParams = new FrameLayout.LayoutParams(
+                -1, dp(80), Gravity.BOTTOM);
+        page.addView(AppNavigation.create(this, AppNavigation.WIDGETS), navigationParams);
+
         return page;
-    }
-
-    private View createSystemCard() {
-        MaterialCardView card = card();
-        LinearLayout body = vertical(dp(18));
-
-        TextView title = text("系统连接", 17,
-                color(com.google.android.material.R.attr.colorOnSurface));
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        body.addView(title);
-        hookStatus = text("正在读取 Hook 状态…", 14,
-                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        hookStatus.setPadding(0, dp(4), 0, dp(10));
-        body.addView(hookStatus);
-
-        safeModeSwitch = new MaterialSwitch(this);
-        safeModeSwitch.setText("安全模式（立即停用全部自定义页面）");
-        safeModeSwitch.setChecked(repository.isSafeMode());
-        safeModeSwitch.setOnCheckedChangeListener((button, checked) -> {
-            repository.setSafeMode(checked);
-            Toast.makeText(this, checked
-                    ? "安全模式已开启，配置仍会保留"
-                    : "安全模式已关闭，自定义页面将恢复",
-                    Toast.LENGTH_SHORT).show();
-            renderWidgets();
-        });
-        body.addView(safeModeSwitch, matchWrap());
-
-        LinearLayout actions = horizontal();
-        MaterialButton permissions = outlinedButton("权限设置", v -> showPermissionDialog());
-        actions.addView(permissions, weighted());
-        MaterialButton diagnostics = outlinedButton("诊断", v -> startActivity(
-                new Intent(this, DiagnosticsActivity.class)));
-        LinearLayout.LayoutParams second = weighted();
-        second.setMarginStart(dp(8));
-        actions.addView(diagnostics, second);
-        body.addView(actions, matchWrap());
-        body.addView(outlinedButton("打开系统小部件", v -> openOfficialWidgets()), matchWrap());
-        card.addView(body);
-        return card;
-    }
-
-    private void showPermissionDialog() {
-        String[] items = {
-                "媒体会话访问", "手电筒权限", "勿扰模式访问",
-                "修改系统设置", "高级磁贴适配器", "LSPosed"
-        };
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("权限设置")
-                .setItems(items, (dialog, which) -> {
-                    if (which == 0) {
-                        startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
-                    } else if (which == 1) {
-                        if (checkSelfPermission(Manifest.permission.CAMERA)
-                                != PackageManager.PERMISSION_GRANTED) {
-                            requestPermissions(new String[]{Manifest.permission.CAMERA},
-                                    REQUEST_CAMERA_FOR_TORCH);
-                        } else {
-                            Toast.makeText(this, "手电筒权限已就绪", Toast.LENGTH_SHORT).show();
-                        }
-                    } else if (which == 2) {
-                        startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
-                    } else if (which == 3) {
-                        startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
-                                Uri.parse("package:" + getPackageName())));
-                    } else if (which == 4) {
-                        startActivity(new Intent(this, QSTilePickerActivity.class));
-                    } else {
-                        openLsposed();
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == REQUEST_CAMERA_FOR_TORCH) {
-            boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
-            Toast.makeText(this, granted
-                    ? "手电筒按钮已可用"
-                    : "未授权时手电筒按钮会显示不支持提示", Toast.LENGTH_SHORT).show();
-        }
     }
 
     private void renderWidgets() {
@@ -346,52 +256,9 @@ public final class SettingsActivity extends Activity {
                 .show();
     }
 
-    private void updateHookStatus() {
-        try {
-            Bundle health = getContentResolver().call(
-                    Contract.PROVIDER_URI, "get_health", null, null);
-            boolean catalogue = health != null && health.getBoolean("catalogue_ok");
-            boolean runtime = health != null && health.getBoolean("runtime_ok");
-            boolean compatibility = health != null && health.getBoolean("compatibility_ok");
-            boolean liveRefresh = health != null && health.getBoolean("live_refresh_ok");
-            boolean lyrics = health != null && health.getBoolean("lyrics_ok");
-            boolean qs = health != null && health.getBoolean("qs_ok");
-            hookStatus.setText((compatibility ? "✓" : "○") + " 兼容检查    "
-                    + (catalogue ? "✓" : "○") + " 系统列表\n"
-                    + (runtime ? "✓" : "○") + " 外屏运行时    "
-                    + (liveRefresh ? "✓" : "○") + " 即时刷新\n"
-                    + (lyrics ? "✓" : "○") + " 网易云歌词适配    "
-                    + (qs ? "✓" : "○") + " 高级磁贴适配");
-            hookStatus.setTextColor(color(catalogue
-                    ? androidx.appcompat.R.attr.colorPrimary
-                    : com.google.android.material.R.attr.colorOnSurfaceVariant));
-        } catch (Throwable error) {
-            hookStatus.setText("尚未收到 FlipHome Hook 状态");
-        }
-    }
-
     private void edit(String id) {
         startActivity(new Intent(this, WidgetEditorActivity.class)
                 .putExtra(Contract.EXTRA_WIDGET_ID, id));
-    }
-
-    private void openOfficialWidgets() {
-        try {
-            Intent intent = new Intent().setComponent(new ComponentName(
-                    Contract.TARGET_PACKAGE,
-                    "com.miui.fliphome.settings.widget.WidgetSettingsActivity"));
-            startActivity(intent);
-        } catch (Throwable error) {
-            Toast.makeText(this, "无法打开系统小部件页面", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void openLsposed() {
-        Intent launch = getPackageManager().getLaunchIntentForPackage("org.lsposed.manager");
-        if (launch == null) launch = getPackageManager().getLaunchIntentForPackage("io.github.lsposed.manager");
-        if (launch != null) startActivity(launch);
-        else startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:" + getPackageName())));
     }
 
     private String typeLabel(WidgetConfig config) {

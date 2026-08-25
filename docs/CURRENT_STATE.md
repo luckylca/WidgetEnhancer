@@ -1,6 +1,6 @@
 # Current state
 
-Last synchronized: 2026-08-25 21:25 CST.
+Last synchronized: 2026-08-26 07:50 CST.
 
 ## Product identity
 
@@ -8,7 +8,7 @@ Last synchronized: 2026-08-25 21:25 CST.
 - Required LSPosed scope: `com.miui.fliphome`
 - Optional scopes: `com.netease.cloudmusic` for the native structured-lyric source and `com.android.systemui` for the advanced QS adapter
 - Baseline: MIX Flip 1 (`ruyi`), HyperOS `OS3.0.303.0.WNICNXM`, Android 16
-- Current build: `0.6.9-p1` (versionCode 16)
+- Current build: `0.7.0-p1` (versionCode 17)
 - MixFlipMod remains reverse-engineering reference material only
 
 ## Implemented product path
@@ -41,6 +41,11 @@ new `typeId`, while IDs and private assets remain unchanged. The component tree 
 runtime and package-compatibility representation.
 
 The app also exposes a diagnostics page and a versioned `mixflip-diagnostics` JSON export. It reports versions, permissions, Hook timestamps and aggregate subsystem state without exporting Widget names/IDs, media metadata, lyrics, paths or the user's tile inventory.
+
+The configuration UI now uses a persistent Material 3 bottom tab bar. The Widget tab is limited to
+the primary create/import/edit workflow. The About tab owns concise module health, safe mode,
+permission readiness and launchers for LSPosed, FlipHome settings, diagnostics and the project
+repository.
 
 Common controls use direct semantic actions: app/URI/broadcast launch, volume, mute, flashlight, Do Not Disturb, auto-rotate, lock and media transport. The real SystemUI QSTile bridge is optional and reserved for active tile-only capabilities.
 

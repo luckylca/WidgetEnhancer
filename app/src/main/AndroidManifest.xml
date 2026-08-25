@@ -58,6 +58,10 @@
             android:name=".DiagnosticsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false" />
+
         <receiver
             android:name=".NeteaseLyricsReceiver"
             android:exported="true" />
