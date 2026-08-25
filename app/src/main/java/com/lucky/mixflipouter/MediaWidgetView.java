@@ -2,7 +2,6 @@ package com.lucky.mixflipouter;
 
 import android.annotation.SuppressLint;
 import android.app.Instrumentation;
-import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -14,25 +13,32 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.media.MediaPlayer;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.GestureDetector;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewOutlineProvider;
-import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.view.TextureView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.view.ViewConfiguration;
+import android.view.ViewParent;
 
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
@@ -44,6 +50,8 @@ import java.util.Locale;
 
 @SuppressLint("ViewConstructor")
 final class MediaWidgetView extends FrameLayout {
+    private static final long VOLUME_REPEAT_INTERVAL_MS = 180L;
+
     private final WidgetConfig config;
     private final List<LayerBinding> layerBindings = new ArrayList<>();
     private final List<TimeBinding> timeBindings = new ArrayList<>();
@@ -52,6 +60,15 @@ final class MediaWidgetView extends FrameLayout {
     private final List<AlbumBinding> albumBindings = new ArrayList<>();
     private final List<PlaybackBinding> lyricBindings = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final GestureDetector musicGestures;
+    private final ButtonLayoutEngine.Layout shortcutLayout;
+    private final boolean interactive;
+    private final int touchSlop;
+    private float touchDownX;
+    private float touchDownY;
+    private boolean yieldingToHost;
+    private boolean volumeRepeatActive;
+    private String repeatingVolumeAction;
     private TextureView videoTexture;
     private MediaPlayer mediaPlayer;
     private boolean playerPrepared;
@@ -81,11 +98,64 @@ final class MediaWidgetView extends FrameLayout {
             mainHandler.postDelayed(this, 500L);
         }
     };
+    private final Runnable volumeRepeat = new Runnable() {
+        @Override
+        public void run() {
+            if (!volumeRepeatActive || repeatingVolumeAction == null) return;
+            performAction(repeatingVolumeAction, "");
+            mainHandler.postDelayed(this, VOLUME_REPEAT_INTERVAL_MS);
+        }
+    };
 
     MediaWidgetView(Context context, WidgetConfig config) {
+        this(context, config, true);
+    }
+
+    MediaWidgetView(Context context, WidgetConfig config, boolean interactive) {
         super(context);
         this.config = config;
-        setBackgroundColor(Color.BLACK);
+        this.interactive = interactive;
+        String widgetType = WidgetTypeRegistry.resolve(config);
+        shortcutLayout = WidgetTypeRegistry.SHORTCUTS.equals(widgetType)
+                ? shortcutLayout(config) : null;
+        setBackgroundColor(WidgetTypeRegistry.SHORTCUTS.equals(widgetType)
+                ? Color.TRANSPARENT : Color.BLACK);
+        if (interactive && WidgetTypeRegistry.MUSIC.equals(widgetType)) {
+            musicGestures = new GestureDetector(context,
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override
+                        public boolean onDown(MotionEvent event) {
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onSingleTapConfirmed(MotionEvent event) {
+                            performAction(WidgetTypeRegistry.musicGestureAction(
+                                    false, event.getY(), getHeight()), "");
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onDoubleTap(MotionEvent event) {
+                            performAction(WidgetTypeRegistry.musicGestureAction(
+                                    true, event.getY(), getHeight()), "");
+                            return true;
+                        }
+
+                        @Override
+                        public void onLongPress(MotionEvent event) {
+                            startVolumeRepeat(WidgetTypeRegistry.musicLongPressAction(
+                                    event.getY(), getHeight()));
+                        }
+                    });
+            setClickable(true);
+            setFocusable(true);
+        } else {
+            musicGestures = null;
+        }
+        setClickable(interactive);
+        setFocusable(interactive);
+        touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         applyOfficialWidgetOutline();
         createComponentLayers();
     }
@@ -101,7 +171,8 @@ final class MediaWidgetView extends FrameLayout {
             layerBindings.add(new LayerBinding(layer, component));
             applyComponentOutline(layer, component);
         }
-        if (layerBindings.isEmpty()) {
+        if (layerBindings.isEmpty()
+                && !WidgetTypeRegistry.SHORTCUTS.equals(WidgetTypeRegistry.resolve(config))) {
             showPlaceholder("MIX Flip 外屏扩展\n请在模块 App 中添加组件");
         }
     }
@@ -111,15 +182,21 @@ final class MediaWidgetView extends FrameLayout {
             ImageView artwork = new ImageView(getContext());
             artwork.setScaleType(imageScaleType(component.fillMode));
             artwork.setBackgroundColor(0xFF303030);
-            albumBindings.add(new AlbumBinding(artwork));
+            if (WidgetTypeRegistry.MUSIC.equals(WidgetTypeRegistry.resolve(config))
+                    && component.width >= WidgetConfig.CANVAS_WIDTH
+                    && component.height >= WidgetConfig.CANVAS_HEIGHT) {
+                artwork.setScaleX(1.14f);
+                artwork.setScaleY(1.14f);
+                artwork.setForeground(new ColorDrawable(0x70000000));
+                albumBindings.add(new AlbumBinding(artwork, true));
+            } else {
+                albumBindings.add(new AlbumBinding(artwork, false));
+            }
             return artwork;
         }
         if (WidgetComponent.TYPE_IMAGE.equals(component.type)) {
             ImageView image = new ImageView(getContext());
             image.setScaleType(imageScaleType(component.fillMode));
-            image.setClickable(true);
-            image.setFocusable(true);
-            image.setOnClickListener(view -> openImageInGallery());
             image.post(() -> image.setImageBitmap(loadScaledBitmap(Math.max(getWidth(), 1208), Math.max(getHeight(), 1392))));
             return image;
         }
@@ -159,6 +236,7 @@ final class MediaWidgetView extends FrameLayout {
                 || WidgetComponent.TYPE_TIME.equals(component.type)
                 || WidgetComponent.TYPE_SONG_TITLE.equals(component.type)
                 || WidgetComponent.TYPE_ARTIST.equals(component.type)
+                || WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(component.type)
                 || WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
                 || WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type)) {
             TextView text = new TextView(getContext());
@@ -171,8 +249,11 @@ final class MediaWidgetView extends FrameLayout {
                     || WidgetComponent.TYPE_ARTIST.equals(component.type)) {
                 playbackBindings.add(new PlaybackBinding(text, component));
                 text.setText(component.content);
-            } else if (WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
+            } else if (WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(component.type)
+                    || WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
                     || WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type)) {
+                text.setMaxLines(WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type) ? 3 : 2);
+                text.setEllipsize(TextUtils.TruncateAt.END);
                 lyricBindings.add(new PlaybackBinding(text, component));
                 text.setText(component.content);
             } else {
@@ -181,13 +262,16 @@ final class MediaWidgetView extends FrameLayout {
             return text;
         }
         if (WidgetComponent.TYPE_BUTTON.equals(component.type)) {
-            Button button = new Button(getContext());
-            button.setAllCaps(false);
-            button.setText(component.content);
-            button.setTextColor(parseColor(component.color, Color.WHITE));
-            button.setGravity(Gravity.CENTER);
-            button.setPadding(0, 0, 0, 0);
-            button.setOnClickListener(view -> performAction(component.actionType, component.actionValue));
+            float iconSize = shortcutLayout == null ? Math.min(component.width, component.height)
+                    : shortcutLayout.iconSize;
+            ShortcutTileView button = new ShortcutTileView(getContext(), component, iconSize);
+            button.setClickable(interactive);
+            button.setFocusable(interactive);
+            button.applyBackground(shortcutBackground(component.cornerRadius, 1f));
+            if (interactive) {
+                button.setOnClickListener(
+                        view -> performAction(component.actionType, component.actionValue));
+            }
             return button;
         }
         return null;
@@ -334,7 +418,7 @@ final class MediaWidgetView extends FrameLayout {
             } else if (ActionSpec.MUTE_TOGGLE.equals(type)) {
                 adjustMusicVolume(AudioManager.ADJUST_TOGGLE_MUTE);
             } else if (ActionSpec.isFlashlight(type) || ActionSpec.isMediaControl(type)
-                    || ActionSpec.QS_TILE.equals(type)) {
+                    || ActionSpec.isDirectSystemControl(type) || ActionSpec.QS_TILE.equals(type)) {
                 performProviderAction(type, value);
             } else if (ActionSpec.LOCK_SCREEN.equals(type)) {
                 lockScreen();
@@ -394,29 +478,6 @@ final class MediaWidgetView extends FrameLayout {
         }, "mixflip-lock-screen").start();
     }
 
-    private void openImageInGallery() {
-        Uri media = Contract.mediaUri(config.id);
-        Bundle grant = new Bundle();
-        grant.putString("package", Contract.GALLERY_PACKAGE);
-        try {
-            getContext().getContentResolver().call(
-                    Contract.PROVIDER_URI, "grant_media", config.id, grant);
-        } catch (Throwable error) {
-            Toast.makeText(getContext(), "无法授权系统相册读取图片", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Intent intent = new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(media, config.mimeType)
-                .setPackage(Contract.GALLERY_PACKAGE)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        intent.setClipData(ClipData.newRawUri("MIX Flip Widget image", media));
-        try {
-            getContext().startActivity(intent);
-        } catch (Throwable error) {
-            Toast.makeText(getContext(), "无法打开系统相册", Toast.LENGTH_SHORT).show();
-        }
-    }
-
     private void updateTime(TimeBinding binding) {
         String pattern = binding.component.content.trim();
         if (pattern.isEmpty()) pattern = "HH:mm";
@@ -470,8 +531,10 @@ final class MediaWidgetView extends FrameLayout {
         int height = Math.max(256, binding.view.getHeight());
         new Thread(() -> {
             Bitmap bitmap = loadBitmap(Contract.PLAYBACK_ARTWORK_URI, width, height);
+            if (binding.blur && bitmap != null) bitmap = blurArtwork(bitmap);
+            Bitmap loaded = bitmap;
             binding.view.post(() -> {
-                if (binding.requestedRevision == revision) binding.view.setImageBitmap(bitmap);
+                if (binding.requestedRevision == revision) binding.view.setImageBitmap(loaded);
             });
         }, "mixflip-artwork-load").start();
     }
@@ -486,12 +549,9 @@ final class MediaWidgetView extends FrameLayout {
                 String value;
                 if (!available) {
                     value = binding.component.content.isEmpty()
-                            ? (WidgetComponent.TYPE_LYRIC_NEXT.equals(binding.component.type)
-                            ? "下一句歌词" : "当前歌词")
-                            : binding.component.content;
+                            ? lyricPlaceholder(binding.component.type) : binding.component.content;
                 } else {
-                    String key = WidgetComponent.TYPE_LYRIC_NEXT.equals(binding.component.type)
-                            ? "next" : "current";
+                    String key = lyricStateKey(binding.component.type);
                     value = state.getString(key, "");
                     if (value == null || value.isEmpty()) {
                         value = state.getString(key + "_translation", "");
@@ -506,6 +566,98 @@ final class MediaWidgetView extends FrameLayout {
     private boolean runtimeVisible() {
         return isAttachedToWindow() && getVisibility() == VISIBLE
                 && getWindowVisibility() == VISIBLE && isShown();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (interactive && action == MotionEvent.ACTION_DOWN) {
+            stopVolumeRepeat();
+            touchDownX = event.getX();
+            touchDownY = event.getY();
+            yieldingToHost = false;
+            disallowHostIntercept(true);
+        } else if (interactive && action == MotionEvent.ACTION_MOVE && !yieldingToHost
+                && shouldYieldToHost(touchDownX, touchDownY,
+                event.getX(), event.getY(), touchSlop)) {
+            yieldingToHost = true;
+            stopVolumeRepeat();
+            cancelOwnGesture(event);
+            disallowHostIntercept(false);
+        }
+        if (yieldingToHost) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                stopVolumeRepeat();
+                disallowHostIntercept(false);
+            }
+            return true;
+        }
+        if (musicGestures != null) {
+            musicGestures.onTouchEvent(event);
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                stopVolumeRepeat();
+                disallowHostIntercept(false);
+            }
+            return true;
+        }
+        boolean handled = super.dispatchTouchEvent(event);
+        if (interactive && (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
+            disallowHostIntercept(false);
+        }
+        return handled;
+    }
+
+    private void cancelOwnGesture(MotionEvent source) {
+        stopVolumeRepeat();
+        MotionEvent cancel = MotionEvent.obtain(source);
+        cancel.setAction(MotionEvent.ACTION_CANCEL);
+        if (musicGestures != null) musicGestures.onTouchEvent(cancel);
+        else super.dispatchTouchEvent(cancel);
+        cancel.recycle();
+    }
+
+    static boolean shouldYieldToHost(float downX, float downY,
+                                     float currentX, float currentY, int touchSlop) {
+        float deltaX = currentX - downX;
+        float deltaY = currentY - downY;
+        return deltaX * deltaX + deltaY * deltaY > touchSlop * (float) touchSlop;
+    }
+
+    private void disallowHostIntercept(boolean disallow) {
+        ViewParent parent = getParent();
+        if (parent != null) parent.requestDisallowInterceptTouchEvent(disallow);
+    }
+
+    private void startVolumeRepeat(String action) {
+        stopVolumeRepeat();
+        repeatingVolumeAction = action;
+        volumeRepeatActive = true;
+        performAction(action, "");
+        mainHandler.postDelayed(volumeRepeat, VOLUME_REPEAT_INTERVAL_MS);
+    }
+
+    private void stopVolumeRepeat() {
+        volumeRepeatActive = false;
+        repeatingVolumeAction = null;
+        mainHandler.removeCallbacks(volumeRepeat);
+    }
+
+    private static String lyricStateKey(String type) {
+        if (WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(type)) return "previous";
+        if (WidgetComponent.TYPE_LYRIC_NEXT.equals(type)) return "next";
+        return "current";
+    }
+
+    private static boolean isLyricComponent(WidgetComponent component) {
+        return WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(component.type)
+                || WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
+                || WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type);
+    }
+
+    private static String lyricPlaceholder(String type) {
+        if (WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(type)) return "上一句歌词";
+        if (WidgetComponent.TYPE_LYRIC_NEXT.equals(type)) return "下一句歌词";
+        return "当前歌词";
     }
 
     private void updatePlaybackSchedule() {
@@ -537,27 +689,49 @@ final class MediaWidgetView extends FrameLayout {
         for (LayerBinding binding : layerBindings) {
             WidgetComponent component = binding.component;
             LayoutParams params = (LayoutParams) binding.view.getLayoutParams();
-            params.leftMargin = Math.round(component.x * scaleX);
-            params.topMargin = Math.round(component.y * scaleY);
-            params.width = Math.max(1, Math.round(component.width * scaleX));
-            params.height = Math.max(1, Math.round(component.height * scaleY));
-            binding.view.setLayoutParams(params);
+            int left = Math.round(component.x * scaleX);
+            int top = Math.round(component.y * scaleY);
+            int layerWidth = Math.max(1, Math.round(component.width * scaleX));
+            int layerHeight = Math.max(1, Math.round(component.height * scaleY));
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type)
+                    && WidgetTypeRegistry.SHORTCUTS.equals(WidgetTypeRegistry.resolve(config))) {
+                int canvasLeft = Math.round(
+                        (width - WidgetConfig.CANVAS_WIDTH * textScale) / 2f);
+                int canvasTop = Math.round(
+                        (height - WidgetConfig.CANVAS_HEIGHT * textScale) / 2f);
+                left = canvasLeft + Math.round(component.x * textScale);
+                top = canvasTop + Math.round(component.y * textScale);
+                layerWidth = Math.max(1, Math.round(component.width * textScale));
+                layerHeight = Math.max(1, Math.round(component.height * textScale));
+            }
+            if (params.leftMargin != left || params.topMargin != top
+                    || params.width != layerWidth || params.height != layerHeight) {
+                params.leftMargin = left;
+                params.topMargin = top;
+                params.width = layerWidth;
+                params.height = layerHeight;
+                binding.view.setLayoutParams(params);
+            }
             binding.view.setAlpha(component.opacity);
             binding.view.invalidateOutline();
 
             if (binding.view instanceof TextView) {
-                ((TextView) binding.view).setTextSize(
-                        TypedValue.COMPLEX_UNIT_PX, component.textSize * textScale);
+                TextView text = (TextView) binding.view;
+                float maximumSize = component.textSize * textScale;
+                if (isLyricComponent(component)) {
+                    float minimumCanvasSize = WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
+                            ? 20f : 16f;
+                    text.setAutoSizeTextTypeUniformWithConfiguration(
+                            Math.max(1, Math.round(minimumCanvasSize * textScale)),
+                            Math.max(1, Math.round(maximumSize)), 1,
+                            TypedValue.COMPLEX_UNIT_PX);
+                } else {
+                    text.setTextSize(TypedValue.COMPLEX_UNIT_PX, maximumSize);
+                }
             }
-            if (binding.view instanceof Button) {
-                Button button = (Button) binding.view;
-                button.setMinWidth(0);
-                button.setMinHeight(0);
-                GradientDrawable background = new GradientDrawable();
-                background.setColor(0xB3202020);
-                background.setCornerRadius(component.cornerRadius * textScale);
-                background.setStroke(Math.max(1, Math.round(textScale)), 0x55FFFFFF);
-                button.setBackground(background);
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type)) {
+                ((ShortcutTileView) binding.view).applyBackground(
+                        shortcutBackground(component.cornerRadius, textScale));
             }
         }
         updateVideoTransform(videoTexture == null ? 0 : videoTexture.getWidth(),
@@ -587,6 +761,106 @@ final class MediaWidgetView extends FrameLayout {
         }
     }
 
+    private StateListDrawable shortcutBackground(float cornerRadius, float scale) {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed},
+                shortcutShape(0x7AFFFFFF, cornerRadius, scale));
+        states.addState(new int[0], shortcutShape(0x42FFFFFF, cornerRadius, scale));
+        return states;
+    }
+
+    private GradientDrawable shortcutShape(int color, float cornerRadius, float scale) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(cornerRadius * scale);
+        return shape;
+    }
+
+    static Bitmap blurArtwork(Bitmap source) {
+        int width = Math.max(1, source.getWidth() / 8);
+        int height = Math.max(1, source.getHeight() / 8);
+        Bitmap small = Bitmap.createScaledBitmap(source, width, height, true);
+        int[] pixels = new int[width * height];
+        int[] scratch = new int[pixels.length];
+        small.getPixels(pixels, 0, width, 0, 0, width, height);
+        int radius = Math.max(2, Math.min(10, Math.min(width, height) / 14));
+        for (int pass = 0; pass < 3; pass++) {
+            blurHorizontal(pixels, scratch, width, height, radius);
+            blurVertical(scratch, pixels, width, height, radius);
+        }
+        Bitmap blurred = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        blurred.setPixels(pixels, 0, width, 0, 0, width, height);
+        if (small != source && small != blurred) small.recycle();
+        return blurred;
+    }
+
+    private static void blurHorizontal(int[] input, int[] output,
+                                       int width, int height, int radius) {
+        for (int y = 0; y < height; y++) {
+            int row = y * width;
+            for (int x = 0; x < width; x++) {
+                long a = 0, r = 0, g = 0, b = 0;
+                int start = Math.max(0, x - radius);
+                int end = Math.min(width - 1, x + radius);
+                for (int sample = start; sample <= end; sample++) {
+                    int color = input[row + sample];
+                    a += Color.alpha(color);
+                    r += Color.red(color);
+                    g += Color.green(color);
+                    b += Color.blue(color);
+                }
+                int count = end - start + 1;
+                output[row + x] = Color.argb((int) (a / count), (int) (r / count),
+                        (int) (g / count), (int) (b / count));
+            }
+        }
+    }
+
+    private static void blurVertical(int[] input, int[] output,
+                                     int width, int height, int radius) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                long a = 0, r = 0, g = 0, b = 0;
+                int start = Math.max(0, y - radius);
+                int end = Math.min(height - 1, y + radius);
+                for (int sample = start; sample <= end; sample++) {
+                    int color = input[sample * width + x];
+                    a += Color.alpha(color);
+                    r += Color.red(color);
+                    g += Color.green(color);
+                    b += Color.blue(color);
+                }
+                int count = end - start + 1;
+                output[y * width + x] = Color.argb((int) (a / count), (int) (r / count),
+                        (int) (g / count), (int) (b / count));
+            }
+        }
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        updateLayerLayouts(MeasureSpec.getSize(widthMeasureSpec),
+                MeasureSpec.getSize(heightMeasureSpec));
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        updateLayerLayouts(right - left, bottom - top);
+        for (LayerBinding binding : layerBindings) {
+            LayoutParams params = (LayoutParams) binding.view.getLayoutParams();
+            if (binding.view.getMeasuredWidth() != params.width
+                    || binding.view.getMeasuredHeight() != params.height) {
+                binding.view.measure(
+                        MeasureSpec.makeMeasureSpec(params.width, MeasureSpec.EXACTLY),
+                        MeasureSpec.makeMeasureSpec(params.height, MeasureSpec.EXACTLY));
+            }
+            binding.view.layout(params.leftMargin, params.topMargin,
+                    params.leftMargin + params.width, params.topMargin + params.height);
+        }
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -605,6 +879,7 @@ final class MediaWidgetView extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        stopVolumeRepeat();
         mainHandler.removeCallbacks(timeTicker);
         mainHandler.removeCallbacks(playbackTicker);
         mainHandler.removeCallbacks(lyricTicker);
@@ -622,6 +897,7 @@ final class MediaWidgetView extends FrameLayout {
     @Override
     protected void onVisibilityChanged(View changedView, int visibility) {
         super.onVisibilityChanged(changedView, visibility);
+        if (visibility != VISIBLE) stopVolumeRepeat();
         maybePlay();
         updatePlaybackSchedule();
         updateLyricSchedule();
@@ -630,6 +906,7 @@ final class MediaWidgetView extends FrameLayout {
     @Override
     protected void onWindowVisibilityChanged(int visibility) {
         super.onWindowVisibilityChanged(visibility);
+        if (visibility != VISIBLE) stopVolumeRepeat();
         maybePlay();
         updatePlaybackSchedule();
         updateLyricSchedule();
@@ -679,10 +956,103 @@ final class MediaWidgetView extends FrameLayout {
 
     private static final class AlbumBinding {
         final ImageView view;
+        final boolean blur;
         volatile long requestedRevision = -1;
 
-        AlbumBinding(ImageView view) {
+        AlbumBinding(ImageView view, boolean blur) {
             this.view = view;
+            this.blur = blur;
+        }
+    }
+
+    private static final class ShortcutTileView extends FrameLayout {
+        private final ImageView icon;
+        private final View iconView;
+        private final float baseWidth;
+        private final float baseHeight;
+        private final float baseIconSize;
+
+        ShortcutTileView(Context context, WidgetComponent component, float iconSize) {
+            super(context);
+            baseWidth = component.width;
+            baseHeight = component.height;
+            baseIconSize = iconSize;
+            setClipChildren(false);
+            setElevation(0);
+            setStateListAnimator(null);
+            Drawable drawable = ShortcutIconRenderer.loadAppIcon(context, component);
+            if (drawable != null) {
+                icon = new ImageView(context);
+                icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                icon.setElevation(0);
+                icon.setImageDrawable(drawable);
+                iconView = icon;
+            } else {
+                icon = null;
+                iconView = new SystemActionIconView(context, component.actionType);
+            }
+            addView(iconView);
+            setContentDescription(component.content);
+        }
+
+        void applyBackground(Drawable systemActionBackground) {
+            setBackground(null);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int width = MeasureSpec.getSize(widthMeasureSpec);
+            int height = MeasureSpec.getSize(heightMeasureSpec);
+            setMeasuredDimension(width, height);
+            int iconSize = iconSize(width, height);
+            iconView.measure(exactly(iconSize), exactly(iconSize));
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+            int width = right - left;
+            int height = bottom - top;
+            int iconSize = iconSize(width, height);
+            int iconLeft = (width - iconSize) / 2;
+            int iconTop = (height - iconSize) / 2;
+            iconView.layout(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize);
+        }
+
+        private int iconSize(int width, int height) {
+            float scale = Math.min(width / Math.max(1f, baseWidth),
+                    height / Math.max(1f, baseHeight));
+            return Math.max(1, Math.round(baseIconSize * scale));
+        }
+
+        private static int exactly(int size) {
+            return MeasureSpec.makeMeasureSpec(Math.max(1, size), MeasureSpec.EXACTLY);
+        }
+
+    }
+
+    private static ButtonLayoutEngine.Layout shortcutLayout(WidgetConfig config) {
+        int count = 0;
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type) && component.visible) count++;
+        }
+        count = Math.min(count, ButtonLayoutEngine.MAX_BUTTONS);
+        return count == 0 ? null : ButtonLayoutEngine.layout(
+                count, WidgetConfig.CANVAS_WIDTH, WidgetConfig.CANVAS_HEIGHT);
+    }
+
+    private static final class SystemActionIconView extends View {
+        private final String actionType;
+
+        SystemActionIconView(Context context, String actionType) {
+            super(context);
+            this.actionType = actionType;
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            ShortcutIconRenderer.drawSystemIcon(
+                    canvas, actionType, 0, 0, Math.min(getWidth(), getHeight()));
         }
     }
 

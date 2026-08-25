@@ -11,6 +11,7 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Shader;
+import android.graphics.drawable.Drawable;
 import android.media.MediaMetadataRetriever;
 
 import java.io.File;
@@ -21,13 +22,16 @@ import java.util.Locale;
 final class PreviewRenderer {
     private static final int WIDTH = 440;
     private static final int HEIGHT = 720;
+    private static final int RENDER_VERSION = 6;
 
     static File ensure(Context context, WidgetConfig config, File media, long revision) {
         String id = config == null ? "missing" : safeFilePart(config.id);
         long modified = media.isFile() ? media.lastModified() : 0;
         String mediaType = config == null ? "none" : config.mediaType;
+        String typeId = config == null ? "missing" : WidgetTypeRegistry.resolve(config);
         File output = new File(context.getCacheDir(), String.format(Locale.US,
-                "widget-preview-%s-%d-%d-%s.png", id, revision, modified, mediaType));
+                "widget-preview-v%d-%s-%d-%d-%s-%s.png",
+                RENDER_VERSION, id, revision, modified, mediaType, typeId));
         if (output.isFile() && output.length() > 0) return output;
 
         Bitmap source = null;
@@ -37,17 +41,17 @@ final class PreviewRenderer {
             } else if (media.isFile() && "video".equals(mediaType)) {
                 source = videoFrame(media);
             }
-            render(output, source, config);
+            render(context, output, source, config);
         } catch (Throwable ignored) {
             output.delete();
-            render(output, null, config);
+            render(context, output, null, config);
         } finally {
             if (source != null && !source.isRecycled()) source.recycle();
         }
         return output;
     }
 
-    private static void render(File output, Bitmap source, WidgetConfig config) {
+    private static void render(Context context, File output, Bitmap source, WidgetConfig config) {
         Bitmap preview = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(preview);
         Path shape = officialShape();
@@ -64,13 +68,16 @@ final class PreviewRenderer {
             shader.setLocalMatrix(transform);
             media.setShader(shader);
             canvas.drawPath(shape, media);
+        } else if (config != null && WidgetTypeRegistry.SHORTCUTS.equals(
+                WidgetTypeRegistry.resolve(config))) {
+            drawPlaceholder(context, canvas, config);
         } else {
             Paint background = new Paint(Paint.ANTI_ALIAS_FLAG);
             background.setShader(new LinearGradient(0, 0, WIDTH, HEIGHT,
                     new int[]{0xff151820, 0xff29222e, 0xff17171c},
                     null, Shader.TileMode.CLAMP));
             canvas.drawPath(shape, background);
-            drawPlaceholder(canvas, config);
+            drawPlaceholder(context, canvas, config);
         }
 
         if (config != null && "video".equals(config.mediaType)) drawVideoBadge(canvas);
@@ -119,7 +126,16 @@ final class PreviewRenderer {
         }
     }
 
-    private static void drawPlaceholder(Canvas canvas, WidgetConfig config) {
+    private static void drawPlaceholder(Context context, Canvas canvas, WidgetConfig config) {
+        String typeId = WidgetTypeRegistry.resolve(config);
+        if (WidgetTypeRegistry.MUSIC.equals(typeId)) {
+            drawMusicPreview(canvas);
+            return;
+        }
+        if (WidgetTypeRegistry.SHORTCUTS.equals(typeId)) {
+            drawShortcutPreview(context, canvas, config);
+            return;
+        }
         Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
         accent.setColor(0xffff6900);
         canvas.drawCircle(WIDTH / 2f, 272, 76, accent);
@@ -135,7 +151,60 @@ final class PreviewRenderer {
         text.setFakeBoldText(false);
         text.setTextSize(25);
         text.setColor(0xffc8c8ce);
-        canvas.drawText("图片 · 视频 · 快捷按键", WIDTH / 2f, 477, text);
+        canvas.drawText("选择图片或视频", WIDTH / 2f, 477, text);
+    }
+
+    private static void drawMusicPreview(Canvas canvas) {
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setColor(0xffbfc0c8);
+        text.setTextSize(24);
+        canvas.drawText("暂无播放", WIDTH / 2f, 86, text);
+        text.setColor(0xff92939a);
+        text.setTextSize(22);
+        canvas.drawText("上一句歌词", WIDTH / 2f, 250, text);
+        text.setColor(Color.WHITE);
+        text.setFakeBoldText(true);
+        text.setTextSize(34);
+        canvas.drawText("当前歌词", WIDTH / 2f, 340, text);
+        text.setFakeBoldText(false);
+        text.setColor(0xffa9aab3);
+        text.setTextSize(22);
+        canvas.drawText("下一句歌词", WIDTH / 2f, 438, text);
+        Paint progress = new Paint(Paint.ANTI_ALIAS_FLAG);
+        progress.setColor(0x55ffffff);
+        canvas.drawRoundRect(40, 636, 400, 642, 3, 3, progress);
+        progress.setColor(Color.WHITE);
+        canvas.drawRoundRect(40, 636, 165, 642, 3, 3, progress);
+    }
+
+    private static void drawShortcutPreview(Context context, Canvas canvas, WidgetConfig config) {
+        if (config == null) return;
+        int count = 0;
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_BUTTON.equals(component.type) && component.visible) count++;
+        }
+        count = Math.min(count, ButtonLayoutEngine.MAX_BUTTONS);
+        if (count == 0) return;
+        ButtonLayoutEngine.Layout layout = ButtonLayoutEngine.layout(count, WIDTH, HEIGHT);
+        int visibleIndex = 0;
+        for (WidgetComponent component : config.components) {
+            if (!WidgetComponent.TYPE_BUTTON.equals(component.type) || !component.visible) continue;
+            if (visibleIndex >= layout.items.size()) break;
+            ButtonLayoutEngine.Item item = layout.items.get(visibleIndex++);
+            float iconSize = item.iconSize;
+            float left = item.centerX - iconSize / 2f;
+            float top = item.centerY - iconSize / 2f;
+            Drawable appIcon = ShortcutIconRenderer.loadAppIcon(context, component);
+            if (appIcon != null) {
+                appIcon.setBounds(Math.round(left), Math.round(top),
+                        Math.round(left + iconSize), Math.round(top + iconSize));
+                appIcon.draw(canvas);
+            } else {
+                ShortcutIconRenderer.drawSystemIcon(
+                        canvas, component.actionType, left, top, iconSize);
+            }
+        }
     }
 
     private static void drawVideoBadge(Canvas canvas) {

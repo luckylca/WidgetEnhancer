@@ -2,7 +2,12 @@
 
 ## Purpose
 
-The bridge lets a button component delegate a click to a tile that is already active in the
+The bridge is an optional advanced adapter for a function that is only exposed through an active
+system or third-party tile. Common controls such as volume, flashlight, Do Not Disturb,
+auto-rotate, lock and media transport have direct semantic actions and do not depend on this
+bridge.
+
+For remaining tile-only capabilities, the bridge lets a button component delegate a click to a tile that is already active in the
 HyperOS control center. It does not bind to third-party `TileService` implementations and does
 not imitate their lifecycle. SystemUI remains the tile host and the only process that invokes the
 real `QSTile` instance.
@@ -67,6 +72,10 @@ published as executable.
 5. Open “查看快捷设置磁贴”. Active and available tiles should appear first and be selectable.
 6. In a Widget editor, select a button, choose “快捷设置磁贴”, then pick a tile and save.
 7. Verify the button on the real cover screen and confirm the corresponding control-center state.
+
+On a cold boot, the SystemUI hook waits for the first user unlock before contacting the
+credential-protected module provider. Publication is coalesced and failures use a 30-second
+backoff so the optional adapter cannot create a boot-time refresh loop.
 
 Restarting SystemUI is user-gated because it temporarily redraws core system UI. Current automated
 coverage verifies discovery, disabled-state UX, provider caller checks, snapshot bounds and builds;

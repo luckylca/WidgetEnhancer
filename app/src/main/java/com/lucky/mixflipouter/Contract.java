@@ -10,6 +10,7 @@ final class Contract {
     static final String GALLERY_PACKAGE = "com.miui.gallery";
     static final String AUTHORITY = "com.lucky.mixflipouter.provider";
     static final Uri PROVIDER_URI = Uri.parse("content://" + AUTHORITY);
+    static final Uri CONFIG_URI = Uri.parse("content://" + AUTHORITY + "/config");
     static final Uri LYRICS_URI = Uri.parse("content://" + AUTHORITY + "/lyrics");
     static final Uri QS_URI = Uri.parse("content://" + AUTHORITY + "/qs");
     static final Uri PLAYBACK_ARTWORK_URI = Uri.parse("content://" + AUTHORITY + "/playback/artwork");

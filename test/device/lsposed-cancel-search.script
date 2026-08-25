@@ -1,0 +1,7 @@
+type= user
+count= 2
+speed= 1.0
+start data >>
+Tap(1130,2030)
+UserWait(300)
+Tap(1120,235)

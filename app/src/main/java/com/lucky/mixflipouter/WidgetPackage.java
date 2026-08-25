@@ -125,6 +125,7 @@ final class WidgetPackage {
 
     static void sanitize(WidgetConfig config, boolean hasMedia) {
         config.name = bounded(config.name, 80);
+        config.typeId = WidgetTypeRegistry.resolve(config);
         config.enabled = config.enabled && (!isMedia(config.mediaType) || hasMedia);
         if (!hasMedia && isMedia(config.mediaType)) {
             config.mediaType = "none";
@@ -164,7 +165,9 @@ final class WidgetPackage {
         return WidgetComponent.TYPE_IMAGE.equals(type) || WidgetComponent.TYPE_VIDEO.equals(type)
                 || WidgetComponent.TYPE_TEXT.equals(type) || WidgetComponent.TYPE_TIME.equals(type)
                 || WidgetComponent.TYPE_BUTTON.equals(type) || WidgetComponent.TYPE_SONG_TITLE.equals(type)
-                || WidgetComponent.TYPE_ARTIST.equals(type) || WidgetComponent.TYPE_LYRIC_CURRENT.equals(type)
+                || WidgetComponent.TYPE_ARTIST.equals(type)
+                || WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(type)
+                || WidgetComponent.TYPE_LYRIC_CURRENT.equals(type)
                 || WidgetComponent.TYPE_LYRIC_NEXT.equals(type)
                 || WidgetComponent.TYPE_PLAYBACK_PROGRESS.equals(type)
                 || WidgetComponent.TYPE_ALBUM_ART.equals(type);
@@ -179,7 +182,9 @@ final class WidgetPackage {
                 || ActionSpec.SEND_BROADCAST.equals(type) || ActionSpec.VOLUME_UP.equals(type)
                 || ActionSpec.VOLUME_DOWN.equals(type) || ActionSpec.MUTE_TOGGLE.equals(type)
                 || ActionSpec.FLASHLIGHT_ON.equals(type) || ActionSpec.FLASHLIGHT_OFF.equals(type)
-                || ActionSpec.FLASHLIGHT_TOGGLE.equals(type) || ActionSpec.LOCK_SCREEN.equals(type)
+                || ActionSpec.FLASHLIGHT_TOGGLE.equals(type)
+                || ActionSpec.DO_NOT_DISTURB_TOGGLE.equals(type)
+                || ActionSpec.AUTO_ROTATE_TOGGLE.equals(type) || ActionSpec.LOCK_SCREEN.equals(type)
                 || ActionSpec.MEDIA_PREVIOUS.equals(type)
                 || ActionSpec.MEDIA_PLAY_PAUSE.equals(type) || ActionSpec.MEDIA_NEXT.equals(type)
                 || ActionSpec.QS_TILE.equals(type);

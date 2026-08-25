@@ -5,6 +5,7 @@ import android.database.ContentObserver;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.UserManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -23,12 +24,17 @@ final class SystemUiTileHook {
     private static final String TILE_IMPL = "com.android.systemui.qs.tileimpl.QSTileImpl";
     private static final long HEARTBEAT_MS = 30_000;
     private static final long PUBLISH_THROTTLE_MS = 500;
+    private static final long FAILURE_BACKOFF_MS = 30_000;
     private static volatile Object host;
     private static volatile Context context;
     private static Handler main;
     private static ContentObserver observer;
     private static long lastPublish;
+    private static long nextPublishAttempt;
+    private static long lastFailureLog;
     private static boolean heartbeatStarted;
+    private static boolean publishScheduled;
+    private static boolean publishing;
 
     static void install(ClassLoader loader) {
         try {
@@ -90,7 +96,17 @@ final class SystemUiTileHook {
 
     private static void schedulePublish(long delay) {
         Handler handler = main;
-        if (handler != null) handler.postDelayed(() -> publish(false), delay);
+        if (handler == null) return;
+        synchronized (SystemUiTileHook.class) {
+            if (publishing || publishScheduled) return;
+            publishScheduled = true;
+        }
+        handler.postDelayed(() -> {
+            synchronized (SystemUiTileHook.class) {
+                publishScheduled = false;
+            }
+            publish(false);
+        }, delay);
     }
 
     private static void publish(boolean force) {
@@ -98,8 +114,17 @@ final class SystemUiTileHook {
         Context currentContext = context;
         if (currentHost == null || currentContext == null) return;
         long now = System.currentTimeMillis();
-        if (!force && now - lastPublish < PUBLISH_THROTTLE_MS) return;
+        synchronized (SystemUiTileHook.class) {
+            if (publishing || now < nextPublishAttempt) return;
+            publishing = true;
+        }
         try {
+            UserManager users = (UserManager) currentContext.getSystemService(Context.USER_SERVICE);
+            if (users != null && !users.isUserUnlocked()) {
+                backOff(now, "等待首次解锁后连接模块 Provider", null);
+                return;
+            }
+            if (!force && now - lastPublish < PUBLISH_THROTTLE_MS) return;
             Object value = XposedHelpers.callMethod(currentHost, "getTiles");
             if (!(value instanceof Collection)) return;
             JSONArray tiles = new JSONArray();
@@ -113,9 +138,21 @@ final class SystemUiTileHook {
             currentContext.getContentResolver().call(
                     Contract.PROVIDER_URI, "publish_qs_tiles", null, extras);
             lastPublish = now;
+            nextPublishAttempt = 0;
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: QS snapshot publish failed: " + error);
+            backOff(now, "QS snapshot publish failed", error);
+        } finally {
+            synchronized (SystemUiTileHook.class) {
+                publishing = false;
+            }
         }
+    }
+
+    private static void backOff(long now, String message, Throwable error) {
+        nextPublishAttempt = now + FAILURE_BACKOFF_MS;
+        if (now - lastFailureLog < FAILURE_BACKOFF_MS) return;
+        lastFailureLog = now;
+        XposedBridge.log("MixFlipCustom: " + message + (error == null ? "" : ": " + error));
     }
 
     private static JSONObject describe(Object tile) {

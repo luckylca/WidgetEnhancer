@@ -1,6 +1,7 @@
 package com.lucky.mixflipouter;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -42,6 +43,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookCatalogue(param.classLoader, infoClass);
             hookGroupTitle(param.classLoader);
             hookRuntimeHost(param.classLoader, infoClass);
+            WidgetLimitHook.install(param.classLoader);
             XposedBridge.log("MixFlipCustom: P0 hooks installed");
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: unsupported FlipHome build: " + error);
@@ -149,12 +151,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 hook.setResult(null);
                                 return;
                             }
-                            removeExistingOverlay(host);
+                            prepareRuntimeHost(host);
                             MediaWidgetView overlay = new MediaWidgetView(context, config);
                             overlay.setTag(Contract.RUNTIME_VIEW_TAG);
                             host.addView(overlay, new FrameLayout.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT));
+                            LiveRefreshBridge.trackRuntimeHost(host, widgetId);
                             overlay.post(() -> report(context, "runtime", true,
                                     "运行时视图已创建: " + widgetId
                                             + " · " + overlay.getWidth() + "×" + overlay.getHeight()
@@ -209,10 +212,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
         for (String field : fields) XposedHelpers.setObjectField(info, field, path);
     }
 
-    private static void removeExistingOverlay(ViewGroup host) {
-        for (int i = host.getChildCount() - 1; i >= 0; i--) {
-            if (Contract.RUNTIME_VIEW_TAG.equals(host.getChildAt(i).getTag())) host.removeViewAt(i);
-        }
+    private static void prepareRuntimeHost(ViewGroup host) {
+        // The concrete MAML host must remain as the method result, but its borrowed
+        // renderer and touch target must not show or launch the original Xiaomi widget.
+        host.removeAllViews();
+        host.setBackgroundColor(Color.TRANSPARENT);
+        host.setClickable(false);
+        host.setFocusable(false);
+        try { XposedHelpers.callMethod(host, "setTouchable", false); } catch (Throwable ignored) {}
     }
 
     private static Context currentFlipHomeContext() {

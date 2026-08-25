@@ -9,6 +9,7 @@ import java.util.List;
 
 /** Receives the user-approved active MediaSession list without hooking individual music apps. */
 public final class PlaybackNotificationListener extends NotificationListenerService {
+    private static volatile boolean connected;
     private MediaSessionManager sessionManager;
     private final MediaSessionManager.OnActiveSessionsChangedListener listener =
             PlaybackStateStore::updateSessions;
@@ -17,11 +18,13 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
     public void onCreate() {
         super.onCreate();
         PlaybackArtworkStore.initialize(this);
+        NeteaseLyricFetcher.initialize(this);
     }
 
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
+        connected = true;
         try {
             if (sessionManager != null) {
                 try { sessionManager.removeOnActiveSessionsChangedListener(listener); } catch (Throwable ignored) {}
@@ -38,6 +41,7 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
 
     @Override
     public void onListenerDisconnected() {
+        connected = false;
         if (sessionManager != null) {
             try { sessionManager.removeOnActiveSessionsChangedListener(listener); } catch (Throwable ignored) {}
         }
@@ -47,10 +51,15 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
 
     @Override
     public void onDestroy() {
+        connected = false;
         if (sessionManager != null) {
             try { sessionManager.removeOnActiveSessionsChangedListener(listener); } catch (Throwable ignored) {}
         }
         PlaybackStateStore.clear();
         super.onDestroy();
+    }
+
+    static boolean isConnected() {
+        return connected;
     }
 }

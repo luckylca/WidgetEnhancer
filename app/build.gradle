@@ -10,8 +10,8 @@ android {
         applicationId 'com.lucky.mixflipouter'
         minSdk 30
         targetSdk 36
-        versionCode 7
-        versionName '0.6.0-p1'
+        versionCode 15
+        versionName '0.6.8-p1'
     }
 
     buildTypes {

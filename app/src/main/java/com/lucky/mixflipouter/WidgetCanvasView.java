@@ -22,11 +22,19 @@ import java.util.Locale;
 final class WidgetCanvasView extends View {
     interface Listener {
         void onSelectionChanged(WidgetComponent component);
+        void onComponentChangeStarted(WidgetComponent component);
         void onComponentChanged(WidgetComponent component);
     }
 
     private static final float HANDLE_SIZE = 30f;
     private static final float MIN_SIZE = 40f;
+    private static final float GRID_SIZE = 8f;
+    static final int ALIGN_LEFT = 1;
+    static final int ALIGN_CENTER_HORIZONTAL = 2;
+    static final int ALIGN_RIGHT = 3;
+    static final int ALIGN_TOP = 4;
+    static final int ALIGN_CENTER_VERTICAL = 5;
+    static final int ALIGN_BOTTOM = 6;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint selectionPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -40,6 +48,7 @@ final class WidgetCanvasView extends View {
     private float lastY;
     private boolean resizing;
     private boolean moved;
+    private boolean gridEnabled;
 
     WidgetCanvasView(Context context) {
         super(context);
@@ -72,8 +81,28 @@ final class WidgetCanvasView extends View {
         return selected;
     }
 
+    void setGridEnabled(boolean enabled) {
+        gridEnabled = enabled;
+        invalidate();
+    }
+
+    void refreshAfterHistory(String selectedId) {
+        selected = null;
+        if (config != null && selectedId != null) {
+            for (WidgetComponent component : config.components) {
+                if (selectedId.equals(component.id)) {
+                    selected = component;
+                    break;
+                }
+            }
+        }
+        invalidate();
+        notifySelection();
+    }
+
     void addComponent(WidgetComponent component) {
         if (config == null) return;
+        notifyChangeStarted();
         component.zIndex = nextZIndex();
         config.components.add(component);
         selected = component;
@@ -84,6 +113,7 @@ final class WidgetCanvasView extends View {
 
     void duplicateSelected() {
         if (config == null || selected == null) return;
+        notifyChangeStarted();
         WidgetComponent copy = selected.copy();
         copy.x = Math.min(WidgetConfig.CANVAS_WIDTH - copy.width, copy.x + 18);
         copy.y = Math.min(WidgetConfig.CANVAS_HEIGHT - copy.height, copy.y + 18);
@@ -97,6 +127,7 @@ final class WidgetCanvasView extends View {
 
     void deleteSelected() {
         if (config == null || selected == null) return;
+        notifyChangeStarted();
         config.components.remove(selected);
         selected = null;
         invalidate();
@@ -110,6 +141,7 @@ final class WidgetCanvasView extends View {
         int index = ordered.indexOf(selected);
         int target = Math.max(0, Math.min(ordered.size() - 1, index + direction));
         if (target == index) return;
+        notifyChangeStarted();
         WidgetComponent other = ordered.get(target);
         int old = selected.zIndex;
         selected.zIndex = other.zIndex;
@@ -122,12 +154,50 @@ final class WidgetCanvasView extends View {
         notifyChanged();
     }
 
+    void moveLayerToEdge(boolean front) {
+        if (config == null || selected == null) return;
+        ArrayList<WidgetComponent> ordered = orderedComponents();
+        int index = ordered.indexOf(selected);
+        int target = front ? ordered.size() - 1 : 0;
+        if (index < 0 || index == target) return;
+        notifyChangeStarted();
+        ordered.remove(index);
+        ordered.add(front ? ordered.size() : 0, selected);
+        for (int i = 0; i < ordered.size(); i++) ordered.get(i).zIndex = i;
+        invalidate();
+        notifyChanged();
+    }
+
     void toggleSelectedLock() {
         if (selected == null) return;
+        notifyChangeStarted();
         selected.locked = !selected.locked;
         invalidate();
         notifyChanged();
         notifySelection();
+    }
+
+    void alignSelected(int alignment) {
+        if (selected == null || selected.locked) return;
+        float nextX = selected.x;
+        float nextY = selected.y;
+        if (alignment == ALIGN_LEFT) nextX = 0;
+        else if (alignment == ALIGN_CENTER_HORIZONTAL) {
+            nextX = (WidgetConfig.CANVAS_WIDTH - selected.width) / 2f;
+        } else if (alignment == ALIGN_RIGHT) {
+            nextX = WidgetConfig.CANVAS_WIDTH - selected.width;
+        } else if (alignment == ALIGN_TOP) nextY = 0;
+        else if (alignment == ALIGN_CENTER_VERTICAL) {
+            nextY = (WidgetConfig.CANVAS_HEIGHT - selected.height) / 2f;
+        } else if (alignment == ALIGN_BOTTOM) {
+            nextY = WidgetConfig.CANVAS_HEIGHT - selected.height;
+        } else return;
+        if (Math.abs(nextX - selected.x) < 0.01f && Math.abs(nextY - selected.y) < 0.01f) return;
+        notifyChangeStarted();
+        selected.x = clamp(nextX, 0, WidgetConfig.CANVAS_WIDTH - selected.width);
+        selected.y = clamp(nextY, 0, WidgetConfig.CANVAS_HEIGHT - selected.height);
+        invalidate();
+        notifyChanged();
     }
 
     @Override
@@ -135,6 +205,7 @@ final class WidgetCanvasView extends View {
         super.onDraw(canvas);
         canvasBounds.set(0, 0, getWidth(), getHeight());
         float outerRadius = dp(24);
+        paint.setAlpha(255);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Color.BLACK);
         canvas.drawRoundRect(canvasBounds, outerRadius, outerRadius, paint);
@@ -144,12 +215,29 @@ final class WidgetCanvasView extends View {
         clipPath.reset();
         clipPath.addRoundRect(canvasBounds, outerRadius, outerRadius, Path.Direction.CW);
         canvas.clipPath(clipPath);
+        if (gridEnabled) drawGrid(canvas);
         for (WidgetComponent component : orderedComponents()) {
             if (component.visible) drawComponent(canvas, component);
         }
         canvas.restoreToCount(save);
 
         if (selected != null && selected.visible) drawSelection(canvas, selected);
+    }
+
+    private void drawGrid(Canvas canvas) {
+        paint.setAlpha(255);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(1));
+        for (float x = GRID_SIZE; x < WidgetConfig.CANVAS_WIDTH; x += GRID_SIZE) {
+            paint.setColor(((int) x) % 40 == 0 ? 0x26FFFFFF : 0x0DFFFFFF);
+            float physicalX = x * getWidth() / WidgetConfig.CANVAS_WIDTH;
+            canvas.drawLine(physicalX, 0, physicalX, getHeight(), paint);
+        }
+        for (float y = GRID_SIZE; y < WidgetConfig.CANVAS_HEIGHT; y += GRID_SIZE) {
+            paint.setColor(((int) y) % 40 == 0 ? 0x26FFFFFF : 0x0DFFFFFF);
+            float physicalY = y * getHeight() / WidgetConfig.CANVAS_HEIGHT;
+            canvas.drawLine(0, physicalY, getWidth(), physicalY, paint);
+        }
     }
 
     private void drawComponent(Canvas canvas, WidgetComponent component) {
@@ -199,6 +287,8 @@ final class WidgetCanvasView extends View {
                 value = value.isEmpty() ? "歌曲名称" : value;
             } else if (WidgetComponent.TYPE_ARTIST.equals(component.type)) {
                 value = value.isEmpty() ? "歌手" : value;
+            } else if (WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(component.type)) {
+                value = value.isEmpty() ? "上一句歌词" : value;
             } else if (WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)) {
                 value = value.isEmpty() ? "当前歌词" : value;
             } else if (WidgetComponent.TYPE_LYRIC_NEXT.equals(component.type)) {
@@ -302,7 +392,10 @@ final class WidgetCanvasView extends View {
                 if (selected == null || selected.locked) return true;
                 float deltaX = logicalX - lastX;
                 float deltaY = logicalY - lastY;
-                if (Math.abs(deltaX) + Math.abs(deltaY) > 0.2f) moved = true;
+                if (!moved && Math.abs(deltaX) + Math.abs(deltaY) > 0.2f) {
+                    notifyChangeStarted();
+                    moved = true;
+                }
                 if (resizing) {
                     selected.width = clamp(selected.width + deltaX, MIN_SIZE,
                             WidgetConfig.CANVAS_WIDTH - selected.x);
@@ -321,13 +414,36 @@ final class WidgetCanvasView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 getParent().requestDisallowInterceptTouchEvent(false);
-                if (moved) notifyChanged();
+                if (moved) {
+                    if (gridEnabled) snapSelectedToGrid(resizing);
+                    notifyChanged();
+                }
                 resizing = false;
                 moved = false;
                 return true;
             default:
                 return true;
         }
+    }
+
+    private void snapSelectedToGrid(boolean resize) {
+        if (selected == null) return;
+        if (resize) {
+            selected.width = clamp(snap(selected.width), MIN_SIZE,
+                    WidgetConfig.CANVAS_WIDTH - selected.x);
+            selected.height = clamp(snap(selected.height), MIN_SIZE,
+                    WidgetConfig.CANVAS_HEIGHT - selected.y);
+        } else {
+            selected.x = clamp(snap(selected.x), 0,
+                    WidgetConfig.CANVAS_WIDTH - selected.width);
+            selected.y = clamp(snap(selected.y), 0,
+                    WidgetConfig.CANVAS_HEIGHT - selected.height);
+        }
+        invalidate();
+    }
+
+    private static float snap(float value) {
+        return Math.round(value / GRID_SIZE) * GRID_SIZE;
     }
 
     private WidgetComponent findTopmost(float x, float y) {
@@ -377,7 +493,11 @@ final class WidgetCanvasView extends View {
     }
 
     private void notifyChanged() {
-        if (listener != null && selected != null) listener.onComponentChanged(selected);
+        if (listener != null) listener.onComponentChanged(selected);
+    }
+
+    private void notifyChangeStarted() {
+        if (listener != null) listener.onComponentChangeStarted(selected);
     }
 
     private static float clamp(float value, float min, float max) {

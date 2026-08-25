@@ -102,6 +102,27 @@ public final class WidgetSchemaTest {
     }
 
     @Test
+    public void mediaReplacementPreservesUnlimitedCanvasButtons() {
+        WidgetConfig config = new WidgetConfig();
+        config.components.add(WidgetComponent.media(WidgetComponent.TYPE_IMAGE));
+        for (int index = 0; index < 6; index++) {
+            config.components.add(WidgetComponent.button("按钮" + index, ActionSpec.VOLUME_UP,
+                    "", 10, 20 + index * 30, 120, 60, index + 1));
+        }
+
+        config.mediaType = WidgetComponent.TYPE_VIDEO;
+        config.syncMediaComponentFromLegacy();
+
+        assertEquals(7, config.components.size());
+        assertEquals(6, config.components.stream().filter(component ->
+                WidgetComponent.TYPE_BUTTON.equals(component.type)).count());
+        assertTrue(config.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_VIDEO.equals(component.type)));
+        assertFalse(config.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_IMAGE.equals(component.type)));
+    }
+
+    @Test
     public void parameterlessSystemActionCreatesButtonWithoutTargetValue() {
         WidgetConfig config = new WidgetConfig();
         config.labels[0] = "音量＋";
@@ -123,7 +144,26 @@ public final class WidgetSchemaTest {
         assertTrue(ActionSpec.isMediaControl(ActionSpec.MEDIA_NEXT));
         assertFalse(ActionSpec.requiresValue(ActionSpec.MEDIA_PLAY_PAUSE));
         assertFalse(ActionSpec.isMediaControl(ActionSpec.VOLUME_UP));
+        assertTrue(ActionSpec.isDirectSystemControl(ActionSpec.DO_NOT_DISTURB_TOGGLE));
+        assertTrue(ActionSpec.isDirectSystemControl(ActionSpec.AUTO_ROTATE_TOGGLE));
+        assertFalse(ActionSpec.requiresValue(ActionSpec.DO_NOT_DISTURB_TOGGLE));
         assertTrue(ActionSpec.requiresValue(ActionSpec.QS_TILE));
+    }
+
+    @Test
+    public void packageSanitizerKeepsDirectSystemControls() {
+        WidgetConfig config = new WidgetConfig();
+        config.components.add(WidgetComponent.button("勿扰", ActionSpec.DO_NOT_DISTURB_TOGGLE,
+                "", 10, 10, 120, 60, 1));
+        config.components.add(WidgetComponent.button("旋转", ActionSpec.AUTO_ROTATE_TOGGLE,
+                "", 140, 10, 120, 60, 2));
+
+        WidgetPackage.sanitize(config, false);
+
+        assertEquals(ActionSpec.DO_NOT_DISTURB_TOGGLE,
+                config.components.get(0).actionType);
+        assertEquals(ActionSpec.AUTO_ROTATE_TOGGLE,
+                config.components.get(1).actionType);
     }
 
     @Test
@@ -164,9 +204,13 @@ public final class WidgetSchemaTest {
     public void lyricComponentsRoundTripWithoutSchemaMigration() throws Exception {
         WidgetComponent current = new WidgetComponent();
         current.type = WidgetComponent.TYPE_LYRIC_CURRENT;
+        WidgetComponent previous = new WidgetComponent();
+        previous.type = WidgetComponent.TYPE_LYRIC_PREVIOUS;
         WidgetComponent next = new WidgetComponent();
         next.type = WidgetComponent.TYPE_LYRIC_NEXT;
 
+        assertEquals(WidgetComponent.TYPE_LYRIC_PREVIOUS,
+                WidgetComponent.fromJson(previous.toJson()).type);
         assertEquals(WidgetComponent.TYPE_LYRIC_CURRENT,
                 WidgetComponent.fromJson(current.toJson()).type);
         assertEquals(WidgetComponent.TYPE_LYRIC_NEXT,
@@ -196,25 +240,178 @@ public final class WidgetSchemaTest {
     }
 
     @Test
-    public void builtInTemplatesAreEditableWidgetConfigData() {
-        List<WidgetTemplates.Template> templates = WidgetTemplates.all();
-        assertEquals(5, templates.size());
-        WidgetTemplates.Template music = templates.stream()
-                .filter(template -> "music".equals(template.id))
-                .findFirst().orElseThrow(AssertionError::new);
-        assertTrue(music.config.components.stream().anyMatch(component ->
+    public void registeredWidgetTypesBuildFixedLayouts() {
+        List<WidgetTypeRegistry.Type> types = WidgetTypeRegistry.all();
+        assertTrue(types.stream().anyMatch(type -> WidgetTypeRegistry.MEDIA.equals(type.id)));
+        assertTrue(types.stream().anyMatch(type -> WidgetTypeRegistry.MUSIC.equals(type.id)));
+        assertTrue(types.stream().anyMatch(type -> WidgetTypeRegistry.SHORTCUTS.equals(type.id)));
+
+        WidgetConfig music = WidgetTypeRegistry.create(WidgetTypeRegistry.MUSIC);
+        assertEquals(WidgetTypeRegistry.MUSIC, music.typeId);
+        assertTrue(music.components.stream().anyMatch(component ->
                 WidgetComponent.TYPE_ALBUM_ART.equals(component.type)));
-        assertTrue(music.config.components.stream().anyMatch(component ->
+        assertTrue(music.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(component.type)));
+        assertTrue(music.components.stream().anyMatch(component ->
                 WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)));
-        assertTrue(music.config.components.stream().anyMatch(component ->
-                ActionSpec.MEDIA_PLAY_PAUSE.equals(component.actionType)));
-        assertEquals("上一曲", music.config.labels[0]);
-        assertEquals(ActionSpec.MEDIA_PLAY_PAUSE, music.config.actionTypes[1]);
-        WidgetTemplates.Template photo = templates.stream()
-                .filter(template -> "photo".equals(template.id))
-                .findFirst().orElseThrow(AssertionError::new);
-        assertFalse(photo.config.enabled);
-        assertEquals(WidgetComponent.TYPE_IMAGE, photo.config.mediaType);
+        assertFalse(music.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_BUTTON.equals(component.type)));
+
+        WidgetConfig shortcuts = WidgetTypeRegistry.create(WidgetTypeRegistry.SHORTCUTS);
+        shortcuts.components.get(0).actionType = ActionSpec.VOLUME_UP;
+        shortcuts.components.add(WidgetComponent.button(
+                "按钮 2", ActionSpec.VOLUME_UP, "", 0, 0, 1, 1, 1));
+        shortcuts.components.add(WidgetComponent.button(
+                "按钮 3", ActionSpec.VOLUME_DOWN, "", 0, 0, 1, 1, 2));
+        WidgetTypeRegistry.buildShortcutLayout(shortcuts);
+        assertEquals(3, shortcuts.components.size());
+        assertEquals(shortcuts.components.get(0).x, shortcuts.components.get(1).x, 0.001f);
+        assertEquals(WidgetConfig.CANVAS_WIDTH / 2f,
+                shortcuts.components.get(0).x + shortcuts.components.get(0).width / 2f, 0.001f);
+        assertTrue(shortcuts.components.get(0).y < shortcuts.components.get(1).y);
+        assertTrue(shortcuts.components.get(1).y < shortcuts.components.get(2).y);
+    }
+
+    @Test
+    public void existingShortcutWidgetMigratesToCenteredAdaptiveTouchTarget() throws Exception {
+        WidgetConfig old = new WidgetConfig();
+        old.typeId = WidgetTypeRegistry.SHORTCUTS;
+        old.components.add(WidgetComponent.button(
+                "应用", ActionSpec.LAUNCH_APP, "com.example", 28, 200, 384, 96, 0));
+
+        WidgetComponent migrated = WidgetConfig.fromJson(old.toJson()).components.get(0);
+
+        assertEquals(WidgetConfig.CANVAS_WIDTH / 2f,
+                migrated.x + migrated.width / 2f, 0.001f);
+        assertEquals(WidgetConfig.CANVAS_HEIGHT / 2f,
+                migrated.y + migrated.height / 2f, 0.001f);
+        assertTrue(migrated.cornerRadius > 20f);
+    }
+
+    @Test
+    public void shortcutTilesScaleDownAsTheVisibleCountGrows() {
+        WidgetConfig one = shortcutConfig(1);
+        WidgetConfig two = shortcutConfig(2);
+        WidgetConfig three = shortcutConfig(3);
+
+        assertEquals(320f, one.components.get(0).width, 0.001f);
+        assertEquals(300f, two.components.get(0).width, 0.001f);
+        assertEquals(260f, three.components.get(0).width, 0.001f);
+        assertTrue(one.components.get(0).width > two.components.get(0).width);
+        assertTrue(two.components.get(0).width > three.components.get(0).width);
+    }
+
+    @Test
+    public void unboundShortcutIsKeptForEditingButExcludedFromRuntimeLayout() {
+        WidgetConfig config = shortcutConfig(3);
+        config.components.add(WidgetComponent.button(
+                "按钮 4", ActionSpec.LAUNCH_APP, "", 0, 0, 1, 1, 3));
+
+        WidgetTypeRegistry.buildShortcutLayout(config);
+
+        assertEquals(4, config.components.size());
+        assertEquals(3, config.components.stream().filter(component -> component.visible).count());
+        assertEquals(260f, config.components.get(0).width, 0.001f);
+        assertFalse(config.components.get(3).visible);
+    }
+
+    @Test
+    public void legacyEightButtonLayoutShowsOnlyFirstSixInTwoByThreeTemplate() {
+        WidgetConfig config = shortcutConfig(8);
+
+        assertEquals(6, config.components.stream().filter(component -> component.visible).count());
+        assertTrue(config.components.get(0).x < config.components.get(1).x);
+        assertEquals(config.components.get(0).y, config.components.get(1).y, 0.001f);
+        assertTrue(config.components.get(1).y < config.components.get(2).y);
+        assertTrue(config.components.get(3).y < config.components.get(4).y);
+        assertFalse(config.components.get(6).visible);
+        assertFalse(config.components.get(7).visible);
+    }
+
+    @Test
+    public void widgetTypeRoundTripAndLegacyInferenceRemainCompatible() throws Exception {
+        WidgetConfig source = WidgetTypeRegistry.create(WidgetTypeRegistry.MUSIC);
+        assertEquals(WidgetTypeRegistry.MUSIC,
+                WidgetConfig.fromJson(source.toJson()).typeId);
+
+        JSONObject legacyMedia = new JSONObject()
+                .put("mediaType", WidgetComponent.TYPE_IMAGE)
+                .put("mimeType", "image/jpeg");
+        assertEquals(WidgetTypeRegistry.MEDIA,
+                WidgetConfig.fromJson(legacyMedia).typeId);
+    }
+
+    @Test
+    public void existingTwoLineMusicWidgetGainsPreviousLyricLine() throws Exception {
+        WidgetConfig legacyMusic = new WidgetConfig();
+        legacyMusic.typeId = WidgetTypeRegistry.MUSIC;
+        WidgetComponent title = lyricComponent(WidgetComponent.TYPE_SONG_TITLE);
+        title.textSize = 22;
+        legacyMusic.components.add(title);
+        WidgetComponent artist = lyricComponent(WidgetComponent.TYPE_ARTIST);
+        artist.textSize = 16;
+        legacyMusic.components.add(artist);
+        legacyMusic.components.add(lyricComponent(WidgetComponent.TYPE_LYRIC_CURRENT));
+        legacyMusic.components.add(lyricComponent(WidgetComponent.TYPE_LYRIC_NEXT));
+
+        WidgetConfig migrated = WidgetConfig.fromJson(legacyMusic.toJson());
+
+        assertTrue(migrated.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_LYRIC_PREVIOUS.equals(component.type)));
+        assertEquals(3, migrated.components.stream().filter(component ->
+                component.type.startsWith("lyric_")).count());
+        assertTrue(migrated.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_SONG_TITLE.equals(component.type)
+                        && component.textSize == 24));
+        assertTrue(migrated.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_ARTIST.equals(component.type)
+                        && component.textSize == 18));
+        assertTrue(migrated.components.stream().anyMatch(component ->
+                WidgetComponent.TYPE_LYRIC_CURRENT.equals(component.type)
+                        && component.textSize == 32 && component.height == 120));
+    }
+
+    @Test
+    public void musicGestureMappingMatchesProductContract() {
+        assertEquals(ActionSpec.MEDIA_PLAY_PAUSE,
+                WidgetTypeRegistry.musicGestureAction(false, 100, 720));
+        assertEquals(ActionSpec.MEDIA_PREVIOUS,
+                WidgetTypeRegistry.musicGestureAction(true, 100, 720));
+        assertEquals(ActionSpec.MEDIA_NEXT,
+                WidgetTypeRegistry.musicGestureAction(true, 600, 720));
+        assertEquals(ActionSpec.VOLUME_UP,
+                WidgetTypeRegistry.musicLongPressAction(100, 720));
+        assertEquals(ActionSpec.VOLUME_DOWN,
+                WidgetTypeRegistry.musicLongPressAction(360, 720));
+        assertEquals(ActionSpec.VOLUME_DOWN,
+                WidgetTypeRegistry.musicLongPressAction(600, 720));
+    }
+
+    @Test
+    public void musicTouchYieldsToHostAfterMovementExceedsSlop() {
+        assertFalse(MediaWidgetView.shouldYieldToHost(100, 100, 106, 108, 12));
+        assertTrue(MediaWidgetView.shouldYieldToHost(100, 100, 140, 102, 12));
+        assertTrue(MediaWidgetView.shouldYieldToHost(100, 100, 101, 140, 12));
+    }
+
+    private static WidgetComponent lyricComponent(String type) {
+        WidgetComponent component = new WidgetComponent();
+        component.type = type;
+        component.width = 352;
+        component.height = 60;
+        return component;
+    }
+
+    private static WidgetConfig shortcutConfig(int count) {
+        WidgetConfig config = new WidgetConfig();
+        config.typeId = WidgetTypeRegistry.SHORTCUTS;
+        for (int index = 0; index < count; index++) {
+            config.components.add(WidgetComponent.button(
+                    Integer.toString(index + 1), ActionSpec.VOLUME_UP, "",
+                    0, 0, 1, 1, index));
+        }
+        WidgetTypeRegistry.buildShortcutLayout(config);
+        return config;
     }
 
     @Test

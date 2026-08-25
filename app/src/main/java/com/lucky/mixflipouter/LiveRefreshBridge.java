@@ -2,9 +2,13 @@ package com.lucky.mixflipouter;
 
 import android.content.Context;
 import android.database.ContentObserver;
+import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Bundle;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -24,6 +28,7 @@ final class LiveRefreshBridge {
 
     private static final Object LOCK = new Object();
     private static WeakReference<Object> settingsViewModel = new WeakReference<>(null);
+    private static final List<RuntimeHost> runtimeHosts = new ArrayList<>();
     private static boolean installed;
     private static Context context;
     private static ClassLoader classLoader;
@@ -36,7 +41,7 @@ final class LiveRefreshBridge {
             if (installed) return;
             Handler main = new Handler(Looper.getMainLooper());
             context.getContentResolver().registerContentObserver(
-                    Contract.PROVIDER_URI, true, new ContentObserver(main) {
+                    Contract.CONFIG_URI, false, new ContentObserver(main) {
                         @Override
                         public void onChange(boolean selfChange) {
                             main.post(LiveRefreshBridge::refreshNow);
@@ -52,18 +57,70 @@ final class LiveRefreshBridge {
         settingsViewModel = new WeakReference<>(viewModel);
     }
 
+    static void trackRuntimeHost(ViewGroup host, String widgetId) {
+        if (host == null || widgetId == null || widgetId.isEmpty()) return;
+        synchronized (LOCK) {
+            for (int index = runtimeHosts.size() - 1; index >= 0; index--) {
+                ViewGroup current = runtimeHosts.get(index).host.get();
+                if (current == null || current == host) runtimeHosts.remove(index);
+            }
+            runtimeHosts.add(new RuntimeHost(host, widgetId));
+        }
+    }
+
     private static void refreshNow() {
         Context activeContext = context;
         ClassLoader loader = classLoader;
         if (activeContext == null || loader == null) return;
         try {
             reconcileSelectedWidgets(loader);
+            int refreshedHosts = refreshRuntimeHosts(activeContext);
             refreshOpenSettings();
-            report("live_refresh", true, "配置已即时刷新");
-            XposedBridge.log("MixFlipCustom: live configuration refresh completed");
+            report("live_refresh", true, "配置已即时刷新，重建 " + refreshedHosts + " 个运行时页面");
+            XposedBridge.log("MixFlipCustom: live configuration refresh completed, runtime hosts="
+                    + refreshedHosts);
         } catch (Throwable error) {
             report("live_refresh", false, "即时刷新失败：" + error.getClass().getSimpleName());
             XposedBridge.log("MixFlipCustom: live refresh failed: " + error);
+        }
+    }
+
+    private static int refreshRuntimeHosts(Context activeContext) {
+        ArrayList<RuntimeHost> snapshot;
+        synchronized (LOCK) {
+            for (int index = runtimeHosts.size() - 1; index >= 0; index--) {
+                if (runtimeHosts.get(index).host.get() == null) runtimeHosts.remove(index);
+            }
+            snapshot = new ArrayList<>(runtimeHosts);
+        }
+        int refreshed = 0;
+        for (RuntimeHost tracked : snapshot) {
+            ViewGroup host = tracked.host.get();
+            if (host == null) continue;
+            WidgetConfig config = WidgetConfig.load(activeContext, tracked.widgetId);
+            prepareRuntimeHost(host);
+            if (config == null || !config.enabled) continue;
+            MediaWidgetView overlay = new MediaWidgetView(host.getContext(), config);
+            overlay.setTag(Contract.RUNTIME_VIEW_TAG);
+            host.addView(overlay, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+            refreshed++;
+        }
+        return refreshed;
+    }
+
+    private static void prepareRuntimeHost(ViewGroup host) {
+        for (int index = host.getChildCount() - 1; index >= 0; index--) {
+            View child = host.getChildAt(index);
+            if (Contract.RUNTIME_VIEW_TAG.equals(child.getTag())) host.removeViewAt(index);
+        }
+        host.setBackgroundColor(Color.TRANSPARENT);
+        host.setClickable(false);
+        host.setFocusable(false);
+        try {
+            XposedHelpers.callMethod(host, "setTouchable", false);
+        } catch (Throwable ignored) {
         }
     }
 
@@ -145,6 +202,16 @@ final class LiveRefreshBridge {
             context.getContentResolver().call(
                     Contract.PROVIDER_URI, "report_hook", null, extras);
         } catch (Throwable ignored) {
+        }
+    }
+
+    private static final class RuntimeHost {
+        final WeakReference<ViewGroup> host;
+        final String widgetId;
+
+        RuntimeHost(ViewGroup host, String widgetId) {
+            this.host = new WeakReference<>(host);
+            this.widgetId = widgetId;
         }
     }
 

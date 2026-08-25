@@ -1,46 +1,71 @@
 # Current state
 
+Last synchronized with `STATUS.md`: 2026-08-24 20:05 CST.
+
 ## Product identity
 
 - Module/application ID: `com.lucky.mixflipouter`
-- LSPosed scope: only `com.miui.fliphome`
+- Required LSPosed scope: `com.miui.fliphome`
+- Optional scopes: `com.netease.cloudmusic` for the native structured-lyric source and `com.android.systemui` for the advanced QS adapter
 - Baseline: MIX Flip 1 (`ruyi`), HyperOS `OS3.0.303.0.WNICNXM`, Android 16
-- Current build: `0.2.0-p0`
-- MixFlipMod: pulled for reverse-engineering reference only; never patched or used as a dependency
+- Current build: `0.6.5-p1` (versionCode 12)
+- MixFlipMod remains reverse-engineering reference material only
 
-## P0 integration now implemented
+## Implemented product path
 
-The old demo hook that appended a native page to every `WidgetPagerView.setViews(List)` call has been removed.
+The module injects provider-backed `FlipWidgetInfo` records into FlipHome's official catalogue, maps them to the `自定义` group and lets the official ViewModel/Room path own selection, ordering and persistence. Runtime content remains inside a real `FlipMaMlHostView`, with the custom component renderer added as an overlay.
 
-The module now follows the official system path:
+The configuration app manages multiple schema-v3 Widgets with atomic storage and private assets.
+`WidgetTypeRegistry` is the product extension point: it currently registers media, music and
+shortcut Widgets, but does not impose a three-type limit. Adding a later outer-screen Widget means
+registering a new type and supplying its own editor, fixed semantic layout and runtime behavior.
 
-1. Hook `FlipWatchDefaultConfig.loadAllWidget()` and append provider-backed `FlipWidgetInfo` records.
-2. Hook the widget type mapping so these records appear under `自定义` in FlipHome's exported official settings page.
-3. Let `WidgetViewModel` and `FlipWidgetModel` perform the official add/remove, ordering, LiveData and Room/Gson persistence flow.
-4. When `FlipMaMlWidgetCompat.createMamlHostView()` receives one of our selected IDs, retain a real `FlipMaMlHostView` and add the native runtime renderer as a match-parent overlay.
+The normal user flow no longer exposes the internal component canvas, templates, arbitrary
+positioning or advanced styling. Media selects one image or video and controls video loop/mute.
+Music uses a full-screen blurred album-art background, shows lyrics by default and maps single tap
+to play/pause, upper-half double tap to previous, lower-half double tap to next, upper-half long
+press to repeatedly raise volume, and lower-half long press to repeatedly lower volume until the
+touch ends. A shortcut
+Widget contains up to six bound actions or apps. `ButtonLayoutEngine` selects one of six fixed
+normalized templates: centered one, vertical two/three, centered 2x2, symmetric 2+1+2 or 2x3.
+Visual icon size is separate from the larger touch target. This per-Widget button bound is separate
+from the number of outer-screen Widget pages; FlipHome's former five-page limit is bypassed.
+Playback and lyric notifications update the existing music view only; they are isolated from the
+configuration-change channel so a track switch does not rebuild the pager or change its page.
 
-This keeps `FlipWidgetManager.WidgetViewInfo`, MAML lifecycle commands, pager containers and background helpers type-correct.
+Schema-v2 records migrate in place: media, playback and button components are used to infer the
+new `typeId`, while IDs and private assets remain unchanged. The component tree remains an internal
+runtime and package-compatibility representation.
 
-## On-device evidence
+The app also exposes a diagnostics page and a versioned `mixflip-diagnostics` JSON export. It reports versions, permissions, Hook timestamps and aggregate subsystem state without exporting Widget names/IDs, media metadata, lyrics, paths or the user's tile inventory.
 
-- LSPosed shows the module enabled and only `外屏桌面 / com.miui.fliphome` selected.
-- Official widget settings showed a distinct `自定义` group with provider-backed media preview.
-- Clicking its green add control changed `我的` from 3 to 4.
-- Leaving normally, waiting for Room's asynchronous write, killing FlipHome and reopening preserved 4 items and the selected check.
-- Device-state override `CLOSED` started the real `FlipLauncher` at 1208×1392.
-- Provider diagnostics reported both `catalogue_ok=true` and `runtime_ok=true`.
-- FlipHome logged successful creation of `mixflip_custom_widget_default`; no fatal exception occurred.
+Common controls use direct semantic actions: app/URI/broadcast launch, volume, mute, flashlight, Do Not Disturb, auto-rotate, lock and media transport. The real SystemUI QSTile bridge is optional and reserved for active tile-only capabilities.
 
-## Corrected swipe/freeze analysis
+## Device evidence
 
-`WidgetPagerView.isViewValid()` first requires the selected child to be a `FlipMaMlHostView` with a `FlipWidgetInfo` tag before analytics casts it. Therefore the demo's old plain native child was excluded rather than directly crashing from a String tag. The old architecture was still incomplete because it bypassed `FlipWidgetManager`'s selected list, cache and lifecycle.
+- Two user Widgets appear dynamically in the official `自定义` group and build real runtime hosts.
+- Image and video rendering, official sizing/corners, component composition, flashlight diagnostics and package import/export have physical-device evidence.
+- Notification-listener access is granted and Android binds `PlaybackNotificationListener`; NetEase exposes a real MediaSession.
+- NetEase and SystemUI optional LSPosed scopes are selected. A restarted NetEase process logged successful lyric-adapter installation.
+- Do Not Disturb and auto-rotate direct actions were toggled and automatically restored while their underlying system values were sampled through ADB.
+- A cold boot proved the SystemUI adapter loads. Publication now waits for first unlock and uses coalescing/backoff when the credential-protected provider is unavailable.
+- A controlled SystemUI-only reload loaded the fixed Hook without disturbing Keyguard. Pre-unlock waiting was measured at one log every 30 seconds, replacing the old millisecond flood.
+- The phone is now first-unlocked. Provider access recovered and the live SystemUI snapshot reports
+  a ready bridge with 14 of 15 active tiles available.
+- The diagnostics page and schema-v1 snapshot are device-proven. Both Widgets persisted; notification
+  listener, Camera, DND and write-settings access were ready after supported ADB grants.
+- A real NetEase session is device-proven for metadata, duration, album art and play/pause through
+  the module's own transport-control implementation. MediaSession-ID/API lyrics are also proven:
+  cutover refreshed 3 to 45 lines, and current/next text advanced on a 49-line timeline.
+- MediaSession discovery now has a Provider-owned one-second system rescan fallback. A physical
+  reinstall reproduced HyperOS leaving the notification listener disconnected; without manually
+  rebinding it, the fallback recovered the playing NetEase session and its cached 58-line lyric.
+- 44 unit tests, Debug Lint, Debug assembly and Release assembly pass.
 
-The new architecture removes that mismatch: the system sees a genuine MAML host, while the custom native renderer is its child overlay. Parent `WidgetPagerView.onInterceptTouchEvent()` retains vertical-gesture priority once movement exceeds touch slop. Final repeated swipe testing remains pending only because the cover session is behind secure authentication.
+## Remaining acceptance work
 
-## Current functional limits
+- Execute one reversible advanced tile click.
+- Complete repeated official/custom/official cover swipes, cover action checks, screen-off/on, process-death and restart matrices.
+- Finish type-specific UI polish and release packaging.
 
-- Repository currently exposes one migrated `default` widget.
-- Configuration UI is still the proof-of-concept programmatic Views screen, not Material 3.
-- Image rendering works through a protected content URI and sampled decode.
-- Video still uses `VideoView`; it needs selection-aware lifecycle, retry/fallback and crop configuration.
-- Four fixed action slots support app/component, URI and broadcast actions; they are not yet the requested component tree.
+The detailed milestone ledger is maintained in [`../STATUS.md`](../STATUS.md) and [`../TARGET.md`](../TARGET.md).

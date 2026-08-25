@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <!-- Debug-only ADB entry point for deterministic device regression tests. -->
+        <activity
+            android:name=".DiagnosticsActivity"
+            android:exported="true"
+            tools:replace="android:exported" />
+        <activity
+            android:name=".DeviceTestActivity"
+            android:exported="true"
+            android:theme="@style/AppTheme" />
+    </application>
+</manifest>

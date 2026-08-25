@@ -18,8 +18,8 @@ example.mixflipwidget.zip
 {
   "format": "mixflipwidget",
   "formatVersion": 1,
-  "schemaVersion": 2,
-  "appVersion": "0.6.0-p1",
+  "schemaVersion": 3,
+  "appVersion": "0.6.2-p1",
   "exportedAt": 1787535910465,
   "media": {
     "included": true,
@@ -31,7 +31,8 @@ example.mixflipwidget.zip
 }
 ```
 
-`widget.json` 是 [Widget schema v2](WIDGET_SCHEMA.md)。导入总是创建新的 UUID，
+`widget.json` 是 [Widget schema v3](WIDGET_SCHEMA.md)，包含由注册表解析的 `typeId`。
+旧包缺少 `typeId` 时会根据组件内容推断类型。导入总是创建新的 UUID，
 同名项目自动增加数字后缀，不覆盖现有配置。
 
 ## Reader safety rules

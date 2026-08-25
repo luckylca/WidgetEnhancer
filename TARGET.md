@@ -25,10 +25,15 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 |---|---|
 | Versioned WidgetConfig schema and migration | DONE |
 | Material 3 app shell and navigation | IN PROGRESS |
-| Widget list: create/edit/delete/rename/copy/preview/enable | DONE |
-| Canvas editor: drag/resize/layer/delete/copy | IN PROGRESS |
-| Image, video, text, time and button components | IN PROGRESS |
+| Widget list: create/edit/delete/rename/preview/enable | DONE |
+| Extensible Widget type registry and schema-v3 type migration | DONE |
+| Type-specific editors with fixed product layouts | DONE |
+| Media display: full-screen image or looping video | DONE |
+| Music: blurred artwork, lyrics and required tap/long-press gestures | IN PROGRESS |
+| Shortcut buttons: vertical system/app bindings | IN PROGRESS |
+| Keep free-canvas and advanced style controls out of the user flow | DONE |
 | Volume, flashlight, launch-app and lock actions | IN PROGRESS |
+| Direct Do Not Disturb and auto-rotate actions | DONE |
 | Launchable app picker with icons and labels | DONE |
 | Provider revision and runtime cache invalidation | DONE |
 
@@ -43,7 +48,7 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 | Synced current/next lyric components | IN PROGRESS |
 | Album art, song, artist and playback components | IN PROGRESS |
 
-## P3 — Quick Settings bridge
+## P3 — Optional advanced Quick Settings adapter
 
 | Item | Status |
 |---|---|
@@ -51,15 +56,16 @@ Status values: `DONE`, `IN PROGRESS`, `FAILED`, `BLOCKED`, `TODO`.
 | Discover active system tiles and installed third-party TileServices | DONE |
 | Capability matrix, bounded mailbox and caller checks | DONE |
 | Editor tile picker and runtime action | IN PROGRESS |
-| Enable optional SystemUI scope and prove a real tile click | TODO |
+| Enable optional SystemUI scope | DONE |
+| Prove a real reversible tile click | TODO |
 
 ## P4 — Product completeness
 
 | Item | Status |
 |---|---|
-| Templates as editable WidgetConfig data | DONE |
+| Registry-driven built-in types, with room for future types | DONE |
 | `.mixflipwidget.zip` import/export | DONE |
 | Import/export security bounds and device round trip | DONE |
-| Undo/redo, alignment, grid and advanced layering | TODO |
-| Diagnostics export | TODO |
+| Preserve old schema/component/package compatibility | DONE |
+| Diagnostics page and versioned privacy-bounded JSON export | DONE |
 | Full regression matrix and release packaging | TODO |

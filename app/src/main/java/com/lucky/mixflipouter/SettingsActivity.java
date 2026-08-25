@@ -10,8 +10,6 @@ import android.graphics.Color;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -35,23 +33,18 @@ import java.util.List;
 public final class SettingsActivity extends Activity {
     private static final int REQUEST_CAMERA_FOR_TORCH = 2101;
     private static final int REQUEST_IMPORT_WIDGET = 3101;
-    private static final int REQUEST_EXPORT_WIDGET = 3102;
     private WidgetRepository repository;
     private LinearLayout widgetList;
     private TextView countText;
     private TextView hookStatus;
     private MaterialSwitch safeModeSwitch;
-    private MaterialButton torchPermission;
-    private MaterialButton torchTest;
-    private MaterialButton mediaAccess;
-    private String pendingExportId;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         repository = new WidgetRepository(this);
-        if (state != null) pendingExportId = state.getString("pending_export_id");
         setContentView(createContent());
+        SystemBars.apply(this);
     }
 
     @Override
@@ -59,8 +52,6 @@ public final class SettingsActivity extends Activity {
         super.onResume();
         renderWidgets();
         updateHookStatus();
-        updateTorchPermission();
-        updateMediaAccess();
     }
 
     private View createContent() {
@@ -71,7 +62,7 @@ public final class SettingsActivity extends Activity {
         scroll.setFillViewport(true);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(20), dp(20), dp(112));
+        root.setPadding(dp(20), dp(20), dp(20), dp(40));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
         page.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
 
@@ -87,7 +78,7 @@ public final class SettingsActivity extends Activity {
         title.setPadding(0, dp(2), 0, dp(4));
         root.addView(title);
 
-        TextView subtitle = text("创建自己的图片、视频和快捷控制页面", 15,
+        TextView subtitle = text("管理外屏小部件", 15,
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         root.addView(subtitle);
 
@@ -104,8 +95,8 @@ public final class SettingsActivity extends Activity {
         root.addView(sectionTitle, marginTop(dp(26)));
 
         LinearLayout libraryActions = horizontal();
-        MaterialButton templates = outlinedButton("使用模板", v -> showTemplateDialog());
-        libraryActions.addView(templates, weighted());
+        MaterialButton create = outlinedButton("添加小部件", v -> showCreateDialog());
+        libraryActions.addView(create, weighted());
         MaterialButton importWidget = outlinedButton("导入文件", v -> beginImport());
         LinearLayout.LayoutParams importParams = weighted();
         importParams.setMarginStart(dp(8));
@@ -118,14 +109,6 @@ public final class SettingsActivity extends Activity {
         listParams.topMargin = dp(12);
         root.addView(widgetList, listParams);
 
-        MaterialButton add = new MaterialButton(this);
-        add.setText("＋  创建小部件");
-        add.setTextSize(16);
-        add.setOnClickListener(v -> showCreateDialog());
-        FrameLayout.LayoutParams addParams = new FrameLayout.LayoutParams(-2, dp(58),
-                Gravity.BOTTOM | Gravity.END);
-        addParams.setMargins(dp(20), dp(20), dp(20), dp(24));
-        page.addView(add, addParams);
         return page;
     }
 
@@ -155,76 +138,57 @@ public final class SettingsActivity extends Activity {
         });
         body.addView(safeModeSwitch, matchWrap());
 
-        torchPermission = outlinedButton("授予手电筒权限", v -> requestPermissions(
-                new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_FOR_TORCH));
-        body.addView(torchPermission, matchWrap());
-        torchTest = outlinedButton("测试手电筒（自动恢复）", v -> testTorch());
-        body.addView(torchTest, matchWrap());
-        mediaAccess = outlinedButton("授予媒体通知访问", v -> startActivity(
-                new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
-        body.addView(mediaAccess, matchWrap());
-        body.addView(outlinedButton("查看快捷设置磁贴", v -> startActivity(
-                new Intent(this, QSTilePickerActivity.class))), matchWrap());
-
         LinearLayout actions = horizontal();
-        MaterialButton official = outlinedButton("打开系统小部件", v -> openOfficialWidgets());
-        actions.addView(official, weighted());
-        MaterialButton lsposed = outlinedButton("LSPosed", v -> openLsposed());
+        MaterialButton permissions = outlinedButton("权限设置", v -> showPermissionDialog());
+        actions.addView(permissions, weighted());
+        MaterialButton diagnostics = outlinedButton("诊断", v -> startActivity(
+                new Intent(this, DiagnosticsActivity.class)));
         LinearLayout.LayoutParams second = weighted();
         second.setMarginStart(dp(8));
-        actions.addView(lsposed, second);
+        actions.addView(diagnostics, second);
         body.addView(actions, matchWrap());
+        body.addView(outlinedButton("打开系统小部件", v -> openOfficialWidgets()), matchWrap());
         card.addView(body);
         return card;
     }
 
-    private void updateTorchPermission() {
-        if (torchPermission == null) return;
-        boolean granted = checkSelfPermission(Manifest.permission.CAMERA)
-                == PackageManager.PERMISSION_GRANTED;
-        torchPermission.setText(granted ? "✓ 手电筒权限已就绪" : "授予手电筒权限");
-        torchPermission.setEnabled(!granted);
-        torchTest.setEnabled(granted);
-    }
-
-    private void testTorch() {
-        try {
-            Bundle result = getContentResolver().call(
-                    Contract.PROVIDER_URI, "execute_action", ActionSpec.FLASHLIGHT_ON, null);
-            if (result == null || !result.getBoolean("ok")) {
-                Toast.makeText(this, result == null ? "动作服务无响应"
-                        : result.getString("message", "手电筒不可用"), Toast.LENGTH_LONG).show();
-                return;
-            }
-            boolean wasEnabled = result.getBoolean("previous_enabled");
-            Toast.makeText(this, "手电筒测试通过，正在恢复原状态", Toast.LENGTH_SHORT).show();
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                try {
-                    getContentResolver().call(Contract.PROVIDER_URI, "execute_action",
-                            wasEnabled ? ActionSpec.FLASHLIGHT_ON : ActionSpec.FLASHLIGHT_OFF, null);
-                } catch (Throwable ignored) {
-                }
-            }, 900);
-        } catch (Throwable error) {
-            Toast.makeText(this, "手电筒测试失败：" + error.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void updateMediaAccess() {
-        if (mediaAccess == null) return;
-        String enabled = Settings.Secure.getString(
-                getContentResolver(), "enabled_notification_listeners");
-        String component = new ComponentName(this, PlaybackNotificationListener.class)
-                .flattenToString();
-        boolean granted = enabled != null && enabled.contains(component);
-        mediaAccess.setText(granted ? "✓ 媒体会话访问已就绪" : "授予媒体通知访问");
+    private void showPermissionDialog() {
+        String[] items = {
+                "媒体会话访问", "手电筒权限", "勿扰模式访问",
+                "修改系统设置", "高级磁贴适配器", "LSPosed"
+        };
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("权限设置")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+                    } else if (which == 1) {
+                        if (checkSelfPermission(Manifest.permission.CAMERA)
+                                != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{Manifest.permission.CAMERA},
+                                    REQUEST_CAMERA_FOR_TORCH);
+                        } else {
+                            Toast.makeText(this, "手电筒权限已就绪", Toast.LENGTH_SHORT).show();
+                        }
+                    } else if (which == 2) {
+                        startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
+                    } else if (which == 3) {
+                        startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                Uri.parse("package:" + getPackageName())));
+                    } else if (which == 4) {
+                        startActivity(new Intent(this, QSTilePickerActivity.class));
+                    } else {
+                        openLsposed();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == REQUEST_CAMERA_FOR_TORCH) {
-            updateTorchPermission();
             boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
             Toast.makeText(this, granted
                     ? "手电筒按钮已可用"
@@ -266,7 +230,7 @@ public final class SettingsActivity extends Activity {
         name.setMaxLines(2);
         details.addView(name);
 
-        TextView media = text(mediaLabel(config), 14,
+        TextView media = text(typeLabel(config), 14,
                 color(androidx.appcompat.R.attr.colorPrimary));
         media.setPadding(0, dp(5), 0, 0);
         details.addView(media);
@@ -290,10 +254,6 @@ public final class SettingsActivity extends Activity {
         LinearLayout actions = horizontal();
         MaterialButton edit = textButton("编辑", v -> edit(config.id));
         actions.addView(edit, weighted());
-        MaterialButton copy = textButton("复制", v -> duplicate(config.id));
-        actions.addView(copy, weighted());
-        MaterialButton export = textButton("导出", v -> beginExport(config));
-        actions.addView(export, weighted());
         MaterialButton delete = textButton("删除", v -> confirmDelete(config));
         delete.setTextColor(color(android.R.attr.colorError));
         actions.addView(delete, weighted());
@@ -318,37 +278,15 @@ public final class SettingsActivity extends Activity {
     }
 
     private void showCreateDialog() {
-        EditText name = new EditText(this);
-        name.setHint("例如：旅行相册");
-        name.setSingleLine(true);
-        int horizontal = dp(22);
-        FrameLayout wrapper = new FrameLayout(this);
-        wrapper.setPadding(horizontal, dp(4), horizontal, 0);
-        wrapper.addView(name, new FrameLayout.LayoutParams(-1, -2));
+        List<WidgetTypeRegistry.Type> types = WidgetTypeRegistry.all();
+        String[] labels = new String[types.size()];
+        for (int i = 0; i < types.size(); i++) labels[i] = types.get(i).name;
         new MaterialAlertDialogBuilder(this)
-                .setTitle("创建小部件")
-                .setMessage("它会作为一个独立项目出现在官方“自定义”分组中。")
-                .setView(wrapper)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("创建", (dialog, which) -> {
-                    WidgetConfig created = repository.create(name.getText().toString());
-                    edit(created.id);
-                })
-                .show();
-    }
-
-    private void showTemplateDialog() {
-        List<WidgetTemplates.Template> templates = WidgetTemplates.all();
-        String[] labels = new String[templates.size()];
-        for (int i = 0; i < templates.size(); i++) {
-            WidgetTemplates.Template template = templates.get(i);
-            labels[i] = template.name + "\n" + template.description;
-        }
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("选择模板")
+                .setTitle("选择小部件类型")
                 .setItems(labels, (dialog, which) -> {
-                    WidgetConfig created = repository.createFromTemplate(templates.get(which).config);
-                    Toast.makeText(this, "已从模板创建“" + created.name + "”", Toast.LENGTH_SHORT).show();
+                    WidgetTypeRegistry.Type selected = types.get(which);
+                    WidgetConfig draft = WidgetTypeRegistry.create(selected.id);
+                    WidgetConfig created = repository.createFromTemplate(draft);
                     edit(created.id);
                 })
                 .setNegativeButton("取消", null)
@@ -364,26 +302,10 @@ public final class SettingsActivity extends Activity {
         startActivityForResult(intent, REQUEST_IMPORT_WIDGET);
     }
 
-    private void beginExport(WidgetConfig config) {
-        pendingExportId = config.id;
-        String fileName = config.name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
-        if (fileName.isEmpty()) fileName = "mixflip-widget";
-        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                .addCategory(Intent.CATEGORY_OPENABLE)
-                // Xiaomi's secure picker hides unknown extensions, so keep a ZIP suffix visible.
-                .setType("application/zip")
-                .putExtra(Intent.EXTRA_TITLE, fileName + ".mixflipwidget.zip")
-                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        startActivityForResult(intent, REQUEST_EXPORT_WIDGET);
-    }
-
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            if (requestCode == REQUEST_EXPORT_WIDGET) pendingExportId = null;
-            return;
-        }
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (requestCode == REQUEST_IMPORT_WIDGET) {
             Toast.makeText(this, "正在校验并导入…", Toast.LENGTH_SHORT).show();
@@ -400,47 +322,13 @@ public final class SettingsActivity extends Activity {
                             "导入失败：" + safeMessage(error), Toast.LENGTH_LONG).show());
                 }
             }, "widget-import").start();
-        } else if (requestCode == REQUEST_EXPORT_WIDGET && pendingExportId != null) {
-            String exportId = pendingExportId;
-            pendingExportId = null;
-            Toast.makeText(this, "正在打包导出…", Toast.LENGTH_SHORT).show();
-            new Thread(() -> {
-                try {
-                    WidgetPackage.exportWidget(this, repository, exportId, uri);
-                    runOnUiThread(() -> Toast.makeText(this,
-                            "导出完成", Toast.LENGTH_SHORT).show());
-                } catch (Throwable error) {
-                    runOnUiThread(() -> Toast.makeText(this,
-                            "导出失败：" + safeMessage(error), Toast.LENGTH_LONG).show());
-                }
-            }, "widget-export").start();
         }
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        outState.putString("pending_export_id", pendingExportId);
     }
 
     private static String safeMessage(Throwable error) {
         String message = error.getMessage();
         return message == null || message.trim().isEmpty()
                 ? error.getClass().getSimpleName() : message;
-    }
-
-    private void duplicate(String id) {
-        Toast.makeText(this, "正在复制媒体和配置…", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            WidgetConfig copy = repository.duplicate(id);
-            runOnUiThread(() -> {
-                if (copy == null) Toast.makeText(this, "复制失败", Toast.LENGTH_SHORT).show();
-                else {
-                    renderWidgets();
-                    Toast.makeText(this, "已创建“" + copy.name + "”", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }, "widget-duplicate").start();
     }
 
     private void confirmDelete(WidgetConfig config) {
@@ -473,7 +361,7 @@ public final class SettingsActivity extends Activity {
                     + (runtime ? "✓" : "○") + " 外屏运行时    "
                     + (liveRefresh ? "✓" : "○") + " 即时刷新\n"
                     + (lyrics ? "✓" : "○") + " 网易云歌词适配    "
-                    + (qs ? "✓" : "○") + " QS 磁贴桥接");
+                    + (qs ? "✓" : "○") + " 高级磁贴适配");
             hookStatus.setTextColor(color(catalogue
                     ? androidx.appcompat.R.attr.colorPrimary
                     : com.google.android.material.R.attr.colorOnSurfaceVariant));
@@ -506,10 +394,9 @@ public final class SettingsActivity extends Activity {
                 Uri.parse("package:" + getPackageName())));
     }
 
-    private String mediaLabel(WidgetConfig config) {
-        if ("video".equals(config.mediaType)) return "▶  视频";
-        if ("image".equals(config.mediaType)) return "▧  图片";
-        return "＋  尚未添加媒体";
+    private String typeLabel(WidgetConfig config) {
+        WidgetTypeRegistry.Type type = WidgetTypeRegistry.get(WidgetTypeRegistry.resolve(config));
+        return type == null ? "小部件" : type.name;
     }
 
     private MaterialCardView card() {

@@ -1,6 +1,7 @@
 package com.lucky.mixflipouter;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -13,6 +14,7 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
+import android.provider.Settings;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -34,6 +36,7 @@ public final class ConfigProvider extends ContentProvider {
         lyricsProvider = new LyricsStateStore(getContext());
         qsTileBridge = new QSTileBridgeStore(getContext());
         PlaybackArtworkStore.initialize(getContext());
+        PlaybackStateStore.initialize(getContext());
         initializeTorch();
         return true;
     }
@@ -59,22 +62,14 @@ public final class ConfigProvider extends ContentProvider {
             enforceSystemUiCaller();
             return qsTileBridge.complete(extras);
         }
-        if ("publish_lyrics".equals(method)) {
-            enforceNeteaseCaller();
-            Bundle result = lyricsProvider.publish(extras);
-            if (result.getBoolean("ok")) {
-                getContext().getContentResolver().notifyChange(Contract.LYRICS_URI, null);
-                Bundle report = new Bundle();
-                report.putString("stage", "lyrics");
-                report.putBoolean("ok", true);
-                report.putString("message", "已接收网易云结构化歌词 · "
-                        + result.getInt("line_count", 0) + " 行");
-                saveHookReport(report);
-            }
-            return result;
+        if ("publish_lyrics".equals(method) || "publish_lyrics_internal".equals(method)) {
+            if ("publish_lyrics_internal".equals(method)) enforceOwnCaller();
+            else enforceNeteaseCaller();
+            return publishLyrics(extras);
         }
-        if ("report_lyrics_hook".equals(method)) {
-            enforceNeteaseCaller();
+        if ("report_lyrics_hook".equals(method) || "report_lyrics_hook_internal".equals(method)) {
+            if ("report_lyrics_hook_internal".equals(method)) enforceOwnCaller();
+            else enforceNeteaseCaller();
             saveHookReport(extras);
             return Bundle.EMPTY;
         }
@@ -178,6 +173,8 @@ public final class ConfigProvider extends ContentProvider {
         if (ActionSpec.QS_TILE.equals(action)) {
             return qsTileBridge.request(extras == null ? null : extras.getString("value"));
         }
+        if (ActionSpec.DO_NOT_DISTURB_TOGGLE.equals(action)) return toggleDoNotDisturb(extras);
+        if (ActionSpec.AUTO_ROTATE_TOGGLE.equals(action)) return toggleAutoRotate(extras);
         Bundle result = new Bundle();
         if (!ActionSpec.isFlashlight(action)) {
             result.putBoolean("ok", false);
@@ -217,6 +214,65 @@ public final class ConfigProvider extends ContentProvider {
         return result;
     }
 
+    private Bundle toggleDoNotDisturb(Bundle extras) {
+        Bundle result = new Bundle();
+        NotificationManager manager = (NotificationManager) getContext().getSystemService(
+                android.content.Context.NOTIFICATION_SERVICE);
+        if (manager == null || !manager.isNotificationPolicyAccessGranted()) {
+            result.putBoolean("ok", false);
+            result.putString("message", "请先在配置 App 中授予勿扰模式访问权限");
+            return result;
+        }
+        try {
+            int previous = manager.getCurrentInterruptionFilter();
+            int next = extras != null && extras.containsKey("filter")
+                    ? extras.getInt("filter")
+                    : previous == NotificationManager.INTERRUPTION_FILTER_ALL
+                            ? NotificationManager.INTERRUPTION_FILTER_PRIORITY
+                            : NotificationManager.INTERRUPTION_FILTER_ALL;
+            if (next < NotificationManager.INTERRUPTION_FILTER_ALL
+                    || next > NotificationManager.INTERRUPTION_FILTER_ALARMS) {
+                throw new IllegalArgumentException("无效的勿扰模式");
+            }
+            manager.setInterruptionFilter(next);
+            result.putBoolean("ok", true);
+            result.putBoolean("enabled", next != NotificationManager.INTERRUPTION_FILTER_ALL);
+            result.putInt("previous_filter", previous);
+            result.putInt("filter", next);
+        } catch (Throwable error) {
+            result.putBoolean("ok", false);
+            result.putString("message", error.getMessage() == null
+                    ? "勿扰模式当前不可用" : error.getMessage());
+        }
+        return result;
+    }
+
+    private Bundle toggleAutoRotate(Bundle extras) {
+        Bundle result = new Bundle();
+        if (!Settings.System.canWrite(getContext())) {
+            result.putBoolean("ok", false);
+            result.putString("message", "请先在配置 App 中授予修改系统设置权限");
+            return result;
+        }
+        try {
+            boolean previous = Settings.System.getInt(getContext().getContentResolver(),
+                    Settings.System.ACCELEROMETER_ROTATION, 1) != 0;
+            boolean enabled = extras != null && extras.containsKey("enabled")
+                    ? extras.getBoolean("enabled") : !previous;
+            boolean written = Settings.System.putInt(getContext().getContentResolver(),
+                    Settings.System.ACCELEROMETER_ROTATION, enabled ? 1 : 0);
+            result.putBoolean("ok", written);
+            result.putBoolean("enabled", enabled);
+            result.putBoolean("previous_enabled", previous);
+            if (!written) result.putString("message", "系统拒绝修改自动旋转状态");
+        } catch (Throwable error) {
+            result.putBoolean("ok", false);
+            result.putString("message", error.getMessage() == null
+                    ? "自动旋转当前不可用" : error.getMessage());
+        }
+        return result;
+    }
+
     private void saveHookReport(Bundle extras) {
         if (extras == null) return;
         String stage = extras.getString("stage", "unknown");
@@ -225,6 +281,26 @@ public final class ConfigProvider extends ContentProvider {
                 .putString("hook_" + stage + "_message", extras.getString("message", ""))
                 .putLong("hook_" + stage + "_time", System.currentTimeMillis())
                 .apply();
+    }
+
+    private Bundle publishLyrics(Bundle extras) {
+        Bundle result = lyricsProvider.publish(extras);
+        if (result.getBoolean("ok")) {
+            getContext().getContentResolver().notifyChange(Contract.LYRICS_URI, null);
+            Bundle report = new Bundle();
+            report.putString("stage", "lyrics");
+            report.putBoolean("ok", true);
+            report.putString("message", "已接收网易云结构化歌词 · "
+                    + result.getInt("line_count", 0) + " 行");
+            saveHookReport(report);
+        }
+        return result;
+    }
+
+    private void enforceOwnCaller() {
+        if (Binder.getCallingUid() != android.os.Process.myUid()) {
+            throw new SecurityException("Internal provider method");
+        }
     }
 
     private Bundle getHealth() {

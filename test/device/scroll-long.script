@@ -1,0 +1,17 @@
+type= user
+count= 1
+speed= 1.0
+start data >>
+DispatchPointer(0,0,0,600,2500,1,1,0,1,1,0,0)
+UserWait(80)
+DispatchPointer(0,80,2,600,2200,1,1,0,1,1,0,0)
+UserWait(80)
+DispatchPointer(0,160,2,600,1900,1,1,0,1,1,0,0)
+UserWait(80)
+DispatchPointer(0,240,2,600,1600,1,1,0,1,1,0,0)
+UserWait(80)
+DispatchPointer(0,320,2,600,1300,1,1,0,1,1,0,0)
+UserWait(80)
+DispatchPointer(0,400,2,600,1000,1,1,0,1,1,0,0)
+UserWait(80)
+DispatchPointer(0,480,1,600,700,1,1,0,1,1,0,0)

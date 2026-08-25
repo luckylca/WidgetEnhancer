@@ -11,6 +11,8 @@ final class ActionSpec {
     static final String FLASHLIGHT_ON = "flashlight_on";
     static final String FLASHLIGHT_OFF = "flashlight_off";
     static final String FLASHLIGHT_TOGGLE = "flashlight_toggle";
+    static final String DO_NOT_DISTURB_TOGGLE = "do_not_disturb_toggle";
+    static final String AUTO_ROTATE_TOGGLE = "auto_rotate_toggle";
     static final String LOCK_SCREEN = "lock_screen";
     static final String MEDIA_PREVIOUS = "media_previous";
     static final String MEDIA_PLAY_PAUSE = "media_play_pause";
@@ -32,6 +34,10 @@ final class ActionSpec {
         return MEDIA_PREVIOUS.equals(type)
                 || MEDIA_PLAY_PAUSE.equals(type)
                 || MEDIA_NEXT.equals(type);
+    }
+
+    static boolean isDirectSystemControl(String type) {
+        return DO_NOT_DISTURB_TOGGLE.equals(type) || AUTO_ROTATE_TOGGLE.equals(type);
     }
 
     private ActionSpec() {}

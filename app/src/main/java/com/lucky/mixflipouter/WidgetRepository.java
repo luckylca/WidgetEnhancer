@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.UUID;
 
 final class WidgetRepository {
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
     private static final Object LOCK = new Object();
     private static final String STORE_FILE = "widgets-v1.json";
     private static final String ASSET_ROOT = "widgets";
@@ -239,7 +239,7 @@ final class WidgetRepository {
     private void writeNext(State state) {
         state.revision = Math.max(state.revision + 1, System.currentTimeMillis());
         writeState(state);
-        context.getContentResolver().notifyChange(Contract.PROVIDER_URI, null);
+        context.getContentResolver().notifyChange(Contract.CONFIG_URI, null);
     }
 
     private void writeState(State state) {

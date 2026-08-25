@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -26,8 +29,9 @@
         android:theme="@style/AppTheme">
 
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="为小米 MIX Flip 外屏添加自定义图片、视频和按键页面" />
+        <meta-data android:name="xposeddescription" android:value="为小米 MIX Flip 外屏添加媒体、音乐和快捷功能小部件" />
         <meta-data android:name="xposedminversion" android:value="93" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
 
         <activity
             android:name=".SettingsActivity"
@@ -49,6 +53,14 @@
         <activity
             android:name=".QSTilePickerActivity"
             android:exported="false" />
+
+        <activity
+            android:name=".DiagnosticsActivity"
+            android:exported="false" />
+
+        <receiver
+            android:name=".NeteaseLyricsReceiver"
+            android:exported="true" />
 
         <provider
             android:name=".ConfigProvider"

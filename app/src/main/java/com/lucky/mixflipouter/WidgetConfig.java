@@ -17,6 +17,7 @@ final class WidgetConfig {
     long repositoryRevision;
     String id = Contract.DEFAULT_WIDGET_ID;
     String name = "我的外屏";
+    String typeId = "";
     boolean enabled = true;
     String mediaType = "none";
     String mimeType = "application/octet-stream";
@@ -71,6 +72,7 @@ final class WidgetConfig {
         out.putLong("revision", revision);
         out.putString("id", id);
         out.putString("name", name);
+        out.putString("type_id", typeId);
         out.putBoolean("enabled", enabled);
         out.putString("media_type", mediaType);
         out.putString("mime_type", mimeType);
@@ -95,6 +97,7 @@ final class WidgetConfig {
         c.repositoryRevision = b.getLong("revision", 0);
         c.id = safe(b.getString("id"), Contract.DEFAULT_WIDGET_ID);
         c.name = safe(b.getString("name"), "我的外屏");
+        c.typeId = b.getString("type_id", "");
         c.enabled = b.getBoolean("enabled", true);
         c.mediaType = safe(b.getString("media_type"), "none");
         c.mimeType = safe(b.getString("mime_type"), "application/octet-stream");
@@ -111,6 +114,10 @@ final class WidgetConfig {
             if (item != null) c.components.add(WidgetComponent.fromJson(item));
         }
         if (c.components.isEmpty()) c.rebuildComponentsFromLegacy();
+        boolean fixedShortcutLayout = WidgetTypeRegistry.SHORTCUTS.equals(c.typeId);
+        c.typeId = WidgetTypeRegistry.resolve(c);
+        WidgetTypeRegistry.ensureThreeLineMusicLayout(c);
+        if (fixedShortcutLayout) WidgetTypeRegistry.buildShortcutLayout(c);
         return c;
     }
 
@@ -118,6 +125,7 @@ final class WidgetConfig {
         JSONObject out = new JSONObject();
         out.put("id", id);
         out.put("name", name);
+        out.put("typeId", typeId);
         out.put("enabled", enabled);
         out.put("mediaType", mediaType);
         out.put("mimeType", mimeType);
@@ -147,6 +155,7 @@ final class WidgetConfig {
         WidgetConfig c = new WidgetConfig();
         c.id = safe(in.optString("id", null), Contract.DEFAULT_WIDGET_ID);
         c.name = safe(in.optString("name", null), "我的外屏");
+        c.typeId = in.optString("typeId", "");
         c.enabled = in.optBoolean("enabled", true);
         c.mediaType = safe(in.optString("mediaType", null), "none");
         c.mimeType = safe(in.optString("mimeType", null), "application/octet-stream");
@@ -173,6 +182,10 @@ final class WidgetConfig {
             }
         }
         if (c.components.isEmpty()) c.rebuildComponentsFromLegacy();
+        boolean fixedShortcutLayout = WidgetTypeRegistry.SHORTCUTS.equals(c.typeId);
+        c.typeId = WidgetTypeRegistry.resolve(c);
+        WidgetTypeRegistry.ensureThreeLineMusicLayout(c);
+        if (fixedShortcutLayout) WidgetTypeRegistry.buildShortcutLayout(c);
         return c;
     }
 
@@ -249,6 +262,25 @@ final class WidgetConfig {
             }
             components.add(button);
             active++;
+        }
+        components.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
+    }
+
+    /** Updates the canvas media layer while preserving every user-created component. */
+    void syncMediaComponentFromLegacy() {
+        WidgetComponent retainedMedia = null;
+        for (WidgetComponent component : components) {
+            if ((WidgetComponent.TYPE_IMAGE.equals(component.type)
+                    || WidgetComponent.TYPE_VIDEO.equals(component.type))
+                    && component.type.equals(mediaType) && retainedMedia == null) {
+                retainedMedia = component;
+            }
+        }
+        components.removeIf(component -> WidgetComponent.TYPE_IMAGE.equals(component.type)
+                || WidgetComponent.TYPE_VIDEO.equals(component.type));
+        if (WidgetComponent.TYPE_IMAGE.equals(mediaType)
+                || WidgetComponent.TYPE_VIDEO.equals(mediaType)) {
+            components.add(retainedMedia == null ? WidgetComponent.media(mediaType) : retainedMedia);
         }
         components.sort((left, right) -> Integer.compare(left.zIndex, right.zIndex));
     }

@@ -16,6 +16,12 @@ The active-session selector prefers a session in `STATE_PLAYING`, then falls bac
 
 Runtime polling runs every two seconds only while a song or artist component is attached and visible. Hiding or detaching the Widget cancels polling. Previous, play/pause and next are semantic button actions routed through `MediaController.TransportControls`.
 
+`PlaybackNotificationListener` remains the instant active-session callback path. The Provider also
+rescans `MediaSessionManager.getActiveSessions()` at most once per second and requests listener
+rebinding when its process starts. This handles HyperOS retaining notification-listener approval
+without actually rebinding the service after an APK replacement, and catches players that destroy
+and recreate their Session while an official music Widget is being added.
+
 When a progress component is present, the same visible-only ticker runs every 500 ms and draws the estimated MediaSession position against duration. Album artwork is copied from MediaSession metadata into a module-private JPEG on a single background worker. FlipHome receives only a guarded read-only content URI; it never reads another player's private file or downloads artwork itself.
 
 Notification access is never enabled silently. The configuration App links to Android's notification-listener settings and displays whether the user-approved listener is active.
@@ -24,7 +30,7 @@ Notification access is never enabled silently. The configuration App links to An
 
 - `PlaybackProvider` is the stable playback contract used by the IPC layer.
 - The current implementation is MediaSession-backed and player-agnostic.
-- `LyricsProvider` will be separate because standard MediaSession metadata normally does not provide synchronized lyrics.
+- `LyricsProvider` remains separate because standard MediaSession metadata normally does not provide synchronized lyrics.
 - Player-specific hooks must publish structured lyric/timing data to the module and must not leak reflected player classes into Widget JSON or rendering code.
 
 ## NetEase Cloud Music 9.5.61 research
@@ -39,13 +45,20 @@ The adapter was derived from the APK installed on the target phone (`com.netease
 
 The NetEase process may call only two specially guarded provider methods: publish sanitized lyric timing data and report adapter compatibility. It cannot read Widget configuration or execute actions. At most 320 lines and 240 characters per text field are accepted to stay below Binder transaction limits, then stored as schema-v1 structured data. Runtime current/next-line resolution uses the MediaSession position and runs every 500 ms only while a lyric component is visible.
 
-The LSPosed scope remains mandatory for FlipHome. NetEase Cloud Music is an additional optional scope used only for synchronized lyrics.
+NetEase 9.5.61's device-specific status-lyric controller is not a reliable sole trigger on the target
+process. The module therefore also reads the numeric `MEDIA_ID` from the user-approved MediaSession,
+requests NetEase's public lyric endpoint on a single bounded worker, and parses original, translated
+and romanized LRC tracks. A song-ID match prevents stale lyrics after a track switch. Native Hook
+publication can still replace the fallback timeline when its structured callback is available.
 
-## Pending device proof
+The LSPosed scope remains mandatory for FlipHome. NetEase Cloud Music is an optional scope for the
+native structured source; synchronized lyrics can fall back to the MediaSession song ID without it.
 
-- User-enable the listener in Android settings.
-- Verify metadata and previous/play-pause/next with NetEase Cloud Music first.
-- Verify session switching and no-session fallback.
-- Device-verify the 9.5.61 model callback after enabling the optional NetEase scope.
-- Verify current/next-line synchronization and user lyric-offset semantics with real playback.
-- Device-verify album artwork and progress after MediaSession access is enabled.
+## Device proof
+
+- Notification-listener access is granted through the supported ADB service command and Android has bound `PlaybackNotificationListener`.
+- Metadata, duration, artwork, play/pause and next are proven with a real NetEase session.
+- A real track switch refreshed the fallback from 3 to 45 lines, and a 49-line timeline advanced
+  current/next text against the estimated MediaSession position without a second publication.
+- The optional NetEase scope is enabled and all version-specific hooks install. Native callback
+  coverage remains best-effort; the proven fallback is the current acceptance path.

@@ -1,8 +1,14 @@
 # Known issues
 
-1. The LSPosed Hook has not yet been enabled and physically swipe-tested on the cover screen after migration.
-2. VideoView is provisional and not considered lifecycle-complete.
-3. Settings catalog injection has not been identified or implemented.
-4. The current app UI and data model are the 0.1.0 demo and will be replaced incrementally.
-5. The ADB shell cannot invoke root on this device even though KernelSU is active; root-only test steps may require user approval in the manager or an in-process LSPosed bridge.
-
+1. HyperOS rejects ordinary `adb shell input` injection. Monkey is inconsistent across Material views
+   and the dual-display input topology. AOAv2 USB HID works as a physical input fallback, but remains
+   a developer test technique rather than an app capability.
+2. Shortcut blank taps and bidirectional swipe handoff are fixed in code and covered by runtime
+   layout capture, but repeated official/custom/official swipes still need final physical cover-touch regression.
+3. MediaSession-ID/API lyrics are device-proven. The optional native NetEase Hook installs but its
+   version-specific callback remains best-effort; native lyric offset behavior still needs proof.
+4. The optional SystemUI adapter's pre-unlock backoff and post-unlock snapshot recovery are proven.
+   An actual reversible advanced tile click still needs verification.
+5. Exact property-control polish and the final release bundle remain incomplete. The diagnostics export and editor history/alignment/grid tools are implemented but still need unlocked-device UI regression.
+6. Compatibility is proven only on MIX Flip 1 `ruyi`, HyperOS `OS3.0.303.0.WNICNXM`, Android 16. Reflection adapters must fail closed on unknown builds.
+7. ADB shell has no KernelSU `su` binary on this phone; operations that truly require root cannot be automated from shell.

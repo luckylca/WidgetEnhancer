@@ -64,6 +64,7 @@ public final class QSTilePickerActivity extends Activity {
         list.setOnItemClickListener((parent, view, position, id) -> select(entries.get(position)));
         page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1f));
         setContentView(page);
+        SystemBars.apply(this);
     }
 
     private void loadTiles() {

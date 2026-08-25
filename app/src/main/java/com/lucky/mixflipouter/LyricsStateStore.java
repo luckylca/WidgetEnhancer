@@ -76,9 +76,14 @@ final class LyricsStateStore implements LyricsProvider {
         }
         Snapshot value = load();
         if (value == null || value.lines.isEmpty()) return unavailable(out, "网易云歌词尚未载入");
+        long playbackMusicId = parseMusicId(playback.getString("media_id", ""));
+        if (playbackMusicId > 0 && playbackMusicId != value.musicId) {
+            return unavailable(out, "当前歌曲歌词正在载入");
+        }
 
         long position = Math.max(0, playback.getLong("position", 0));
         int index = findLine(value.lines, position);
+        Line previous = index > 0 ? value.lines.get(index - 1) : null;
         Line current = index >= 0 ? value.lines.get(index) : null;
         Line next = index + 1 < value.lines.size() ? value.lines.get(index + 1) : null;
         if (index < 0 && !value.lines.isEmpty()) next = value.lines.get(0);
@@ -91,6 +96,7 @@ final class LyricsStateStore implements LyricsProvider {
         out.putLong("position", position);
         out.putLong("lyric_offset", value.lyricOffset);
         out.putInt("line_count", value.lines.size());
+        putLine(out, "previous", previous);
         putLine(out, "current", current);
         putLine(out, "next", next);
         return out;
@@ -148,6 +154,15 @@ final class LyricsStateStore implements LyricsProvider {
         if (value == null) return "";
         String clean = value.replace('\u0000', ' ').trim();
         return clean.length() <= limit ? clean : clean.substring(0, limit);
+    }
+
+    private static long parseMusicId(String value) {
+        if (value == null || value.isEmpty()) return 0;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     static final class Line {
