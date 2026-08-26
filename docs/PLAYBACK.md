@@ -20,7 +20,9 @@ Runtime polling runs every two seconds only while a song or artist component is 
 rescans `MediaSessionManager.getActiveSessions()` at most once per second and requests listener
 rebinding when its process starts. This handles HyperOS retaining notification-listener approval
 without actually rebinding the service after an APK replacement, and catches players that destroy
-and recreate their Session while an official music Widget is being added.
+and recreate their Session while an official music Widget is being added. The listener process also
+reconciles active sessions every 1.5 seconds and after NetEase notification changes, covering
+background metadata callbacks that HyperOS silently drops.
 
 When a progress component is present, the same visible-only ticker runs every 500 ms and draws the estimated MediaSession position against duration. Album artwork is copied from MediaSession metadata into a module-private JPEG on a single background worker. FlipHome receives only a guarded read-only content URI; it never reads another player's private file or downloads artwork itself.
 
@@ -43,13 +45,15 @@ The adapter was derived from the APK installed on the target phone (`com.netease
 - `CommonLyricLine` exposes original text, translation, romanization and start/end milliseconds.
 - The adapter hooks this model callback and never scrapes a player-page `TextView`.
 
-The NetEase process may call only two specially guarded provider methods: publish sanitized lyric timing data and report adapter compatibility. It cannot read Widget configuration or execute actions. At most 320 lines and 240 characters per text field are accepted to stay below Binder transaction limits, then stored as schema-v1 structured data. Runtime current/next-line resolution uses the MediaSession position and runs every 500 ms only while a lyric component is visible.
+The NetEase process may call only two specially guarded provider methods: publish sanitized lyric timing data and report adapter compatibility. Android's shared broadcast identity is enabled explicitly, then the receiver verifies the NetEase UID/package before accepting either call. It cannot read Widget configuration or execute actions. At most 320 lines and 240 characters per text field are accepted to stay below Binder transaction limits, then stored as schema-v1 structured data in a private atomic snapshot. Runtime current/next-line resolution uses the MediaSession position and runs every 500 ms only while a lyric component is visible.
 
-NetEase 9.5.61's device-specific status-lyric controller is not a reliable sole trigger on the target
-process. The module therefore also reads the numeric `MEDIA_ID` from the user-approved MediaSession,
-requests NetEase's public lyric endpoint on a single bounded worker, and parses original, translated
-and romanized LRC tracks. A song-ID match prevents stale lyrics after a track switch. Native Hook
-publication can still replace the fallback timeline when its structured callback is available.
+NetEase's Tinker ClassLoader is installed after the initial package Hook. The adapter therefore
+observes the real play-service attachment, reinstalls against that runtime ClassLoader, and runs a
+three-second current-song watchdog until the native lyric callback is actually published. The
+module also reads the numeric `MEDIA_ID` from the user-approved MediaSession, requests NetEase's
+public lyric endpoint on a single bounded worker, and parses original, translated and romanized LRC
+tracks. A song-ID match prevents stale lyrics after a track switch, and native data takes precedence
+over a later fallback response for the same ID.
 
 The LSPosed scope remains mandatory for FlipHome. NetEase Cloud Music is an optional scope for the
 native structured source; synchronized lyrics can fall back to the MediaSession song ID without it.
@@ -60,5 +64,6 @@ native structured source; synchronized lyrics can fall back to the MediaSession 
 - Metadata, duration, artwork, play/pause and next are proven with a real NetEase session.
 - A real track switch refreshed the fallback from 3 to 45 lines, and a 49-line timeline advanced
   current/next text against the estimated MediaSession position without a second publication.
-- The optional NetEase scope is enabled and all version-specific hooks install. Native callback
-  coverage remains best-effort; the proven fallback is the current acceptance path.
+- With Settings foreground, next/previous changed the MediaSession title and atomic lyric snapshot
+  from 79 lines to 47 API / 50 native lines and back without opening a launcher. The optional
+  NetEase runtime callback and process-death restoration are both device-proven.

@@ -26,6 +26,8 @@ public final class DeviceTestActivity extends Activity {
             "com.lucky.mixflipouter.debug.DUMP_DIAGNOSTICS";
     public static final String ACTION_MEDIA_PLAY_PAUSE =
             "com.lucky.mixflipouter.debug.MEDIA_PLAY_PAUSE";
+    public static final String ACTION_DUMP_PLAYBACK =
+            "com.lucky.mixflipouter.debug.DUMP_PLAYBACK";
     public static final String ACTION_OPEN_FIRST_EDITOR =
             "com.lucky.mixflipouter.debug.OPEN_FIRST_EDITOR";
     public static final String ACTION_OPEN_TYPE_EDITOR =
@@ -368,6 +370,19 @@ public final class DeviceTestActivity extends Activity {
             String action = getIntent().getAction();
             if (ACTION_DUMP_DIAGNOSTICS.equals(action)) {
                 result = DiagnosticReport.collect(this, new WidgetRepository(this));
+            } else if (ACTION_DUMP_PLAYBACK.equals(action)) {
+                Bundle value = PlaybackStateStore.provider().snapshot();
+                result.put("available", value.getBoolean("available"));
+                result.put("package", value.getString("package", ""));
+                result.put("title", value.getString("title", ""));
+                result.put("media_id", value.getString("media_id", ""));
+                result.put("playing", value.getBoolean("playing"));
+                result.put("refresh_count", value.getLong("refresh_count"));
+                result.put("last_refresh_elapsed", value.getLong("last_refresh_elapsed"));
+                result.put("watchdog_refresh_count",
+                        PlaybackNotificationListener.watchdogRefreshCount());
+                result.put("watchdog_last_refresh_elapsed",
+                        PlaybackNotificationListener.watchdogLastRefreshElapsed());
             } else if (ACTION_MEDIA_PLAY_PAUSE.equals(action)) {
                 Bundle value = PlaybackStateStore.provider().execute(ActionSpec.MEDIA_PLAY_PAUSE);
                 result.put("ok", value.getBoolean("ok"));

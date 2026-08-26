@@ -1,8 +1,8 @@
 # Status
 
-Last updated: 2026-08-24 23:30 CST
+Last updated: 2026-08-26 15:07 CST
 
-Current development build: `0.6.5-p1` (versionCode 12), targeting Xiaomi MIX Flip 1
+Current development build: `0.7.1-p1` (versionCode 18), targeting Xiaomi MIX Flip 1
 `ruyi`, Android 16 / HyperOS 3.0.303.0.
 
 ## DONE
@@ -69,6 +69,10 @@ Current development build: `0.6.5-p1` (versionCode 12), targeting Xiaomi MIX Fli
 - Enabled the optional NetEase and SystemUI LSPosed scopes through Monkey pointer automation. A restarted NetEase process logged successful installation of the structured lyric adapter.
 - Added a NetEase API fallback keyed only by the active MediaSession `MEDIA_ID`. It parses bounded
   original, translated and romanized LRC tracks while retaining the native Hook as the preferred source.
+- Made background track changes independent of the launcher: a 1.5-second MediaSession watchdog
+  refreshes title/media ID, while the native lyric adapter reattaches to NetEase's real Tinker
+  ClassLoader, retries until publication, shares/verifies broadcast identity and persists lyrics in
+  a private atomic snapshot. A Settings-foreground next/previous test passed for both directions.
 - Device-verified real synchronized lyrics: a cutover from a 3-line track to a 45-line track refreshed
   automatically, and a separate 49-line timeline advanced current/next text without republishing.
 - Cold-booted the physical phone and proved the SystemUI adapter loads. The boot test exposed provider-unavailable log flooding before first unlock; publication is now coalesced, gated on `UserManager.isUserUnlocked()` and failure-backed-off.
@@ -84,7 +88,7 @@ Current development build: `0.6.5-p1` (versionCode 12), targeting Xiaomi MIX Fli
   regression. Release builds retain the non-exported diagnostics Activity and contain no test bridge.
 - Simplified Settings to connection status, safe mode, permissions, diagnostics, system Widgets and the registry-driven Widget list. Import remains for compatibility; copy/export are not exposed.
 - Added type inference for schema-v2 data so existing image/video and button Widgets migrate in place.
-- `testDebugUnitTest` (44 tests), `lintDebug`, `assembleDebug` and `assembleRelease` pass together for the current milestone.
+- `testDebugUnitTest` (48 tests), `lintDebug`, `assembleDebug` and `assembleRelease` pass together for the current milestone.
 
 ## IN PROGRESS
 

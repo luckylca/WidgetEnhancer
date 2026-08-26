@@ -1,6 +1,6 @@
 # Current state
 
-Last synchronized: 2026-08-26 07:50 CST.
+Last synchronized: 2026-08-26 15:07 CST.
 
 ## Product identity
 
@@ -8,7 +8,7 @@ Last synchronized: 2026-08-26 07:50 CST.
 - Required LSPosed scope: `com.miui.fliphome`
 - Optional scopes: `com.netease.cloudmusic` for the native structured-lyric source and `com.android.systemui` for the advanced QS adapter
 - Baseline: MIX Flip 1 (`ruyi`), HyperOS `OS3.0.303.0.WNICNXM`, Android 16
-- Current build: `0.7.0-p1` (versionCode 17)
+- Current build: `0.7.1-p1` (versionCode 18)
 - MixFlipMod remains reverse-engineering reference material only
 
 ## Implemented product path
@@ -35,6 +35,21 @@ Visual icon size is separate from the larger touch target. This per-Widget butto
 from the number of outer-screen Widget pages; FlipHome's former five-page limit is bypassed.
 Playback and lyric notifications update the existing music view only; they are isolated from the
 configuration-change channel so a track switch does not rebuild the pager or change its page.
+The notification-listener process also reconciles active MediaSessions every 1.5 seconds and on
+NetEase notification changes. MediaController callbacks are explicitly delivered on the main
+looper, so a missed or invalid background callback no longer requires returning to FlipHome to
+refresh the title and trigger the lyric fallback. Inside NetEase, a separate three-second watchdog
+checks the play service's current music and retries the native lyric loader until timed lines are
+actually published; merely starting an asynchronous lyric request is no longer treated as success.
+If NetEase creates its play service before LSPosed finishes loading the module, the Hook attaches to
+the existing static service instance so the watchdog is not lost to process-start timing. The Hook
+also observes Android's service attachment and installs the adapter again against the real runtime
+ClassLoader, covering NetEase's post-start Tinker ClassLoader replacement.
+Lyric publication confirms a credential-protected `AtomicFile` snapshot has been written before
+reporting success, so a background process kill cannot discard an in-memory-only update. The old
+SharedPreferences snapshot remains a read-only migration fallback.
+For the same song ID, a successful native structured timeline takes precedence over a later API
+fallback response; the API remains available when the Hook has not published usable lines.
 
 Schema-v2 records migrate in place: media, playback and button components are used to infer the
 new `typeId`, while IDs and private assets remain unchanged. The component tree remains an internal
@@ -67,6 +82,10 @@ Common controls use direct semantic actions: app/URI/broadcast launch, volume, m
 - A real NetEase session is device-proven for metadata, duration, album art and play/pause through
   the module's own transport-control implementation. MediaSession-ID/API lyrics are also proven:
   cutover refreshed 3 to 45 lines, and current/next text advanced on a 49-line timeline.
+- With Android Settings kept foreground, a real next/previous sequence changed `瞬` (79 lines) to
+  `大城小爱` (47 API lines / 50 native lines) and back without visiting either launcher. The module
+  title/media ID and atomic lyric snapshot followed both transitions, and a forced module-process
+  restart restored the 79-line snapshot from disk.
 - MediaSession discovery now has a Provider-owned one-second system rescan fallback. A physical
   reinstall reproduced HyperOS leaving the notification listener disconnected; without manually
   rebinding it, the fallback recovered the playing NetEase session and its cached 58-line lyric.

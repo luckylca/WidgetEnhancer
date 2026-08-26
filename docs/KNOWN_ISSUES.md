@@ -5,8 +5,9 @@
    a developer test technique rather than an app capability.
 2. Shortcut blank taps and bidirectional swipe handoff are fixed in code and covered by runtime
    layout capture, but repeated official/custom/official swipes still need final physical cover-touch regression.
-3. MediaSession-ID/API lyrics are device-proven. The optional native NetEase Hook installs but its
-   version-specific callback remains best-effort; native lyric offset behavior still needs proof.
+3. MediaSession-ID/API lyrics and the optional native NetEase callback are device-proven on 9.5.61.
+   Native lyric offset behavior and future NetEase/Tinker class maps still require version-specific
+   regression when the player updates.
 4. The optional SystemUI adapter's pre-unlock backoff and post-unlock snapshot recovery are proven.
    An actual reversible advanced tile click still needs verification.
 5. Exact property-control polish and the final release bundle remain incomplete. The diagnostics export and editor history/alignment/grid tools are implemented but still need unlocked-device UI regression.

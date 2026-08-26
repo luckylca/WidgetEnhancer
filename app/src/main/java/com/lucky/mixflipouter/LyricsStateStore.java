@@ -3,10 +3,14 @@ package com.lucky.mixflipouter;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.util.AtomicFile;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -14,14 +18,17 @@ import java.util.List;
 /** Persists sanitized lyric timing data and resolves current/next lines from playback position. */
 final class LyricsStateStore implements LyricsProvider {
     private static final String PREF_KEY = "lyrics_snapshot_v1";
+    private static final String SNAPSHOT_FILE = "lyrics-snapshot-v1.json";
     private static final int MAX_LINES = 320;
     private static final int MAX_TEXT_LENGTH = 240;
 
     private final SharedPreferences preferences;
+    private final AtomicFile snapshotFile;
     private Snapshot cached;
 
     LyricsStateStore(Context context) {
         preferences = context.getSharedPreferences(Contract.PREFS, 0);
+        snapshotFile = new AtomicFile(new File(context.getFilesDir(), SNAPSHOT_FILE));
     }
 
     @Override
@@ -32,10 +39,21 @@ final class LyricsStateStore implements LyricsProvider {
         long musicId = payload.getLong("music_id", 0);
         ArrayList<Bundle> rawLines = payload.getParcelableArrayList("lines");
         if (musicId <= 0) return failure(result, "歌曲 ID 无效");
+        String source = clean(payload.getString("source", "netease"), 40);
+        Snapshot existing = load();
+        if ("netease-api".equals(source)
+                && existing != null
+                && existing.musicId == musicId
+                && !"netease-api".equals(existing.source)
+                && !existing.lines.isEmpty()) {
+            result.putBoolean("ok", true);
+            result.putInt("line_count", existing.lines.size());
+            return result;
+        }
 
         Snapshot next = new Snapshot();
         next.musicId = musicId;
-        next.source = clean(payload.getString("source", "netease"), 40);
+        next.source = source;
         next.state = clean(payload.getString("state", ""), 80);
         next.lyricOffset = payload.getLong("lyric_offset", 0);
         next.publishedAt = System.currentTimeMillis();
@@ -55,11 +73,11 @@ final class LyricsStateStore implements LyricsProvider {
         }
         next.lines.sort(Comparator.comparingInt(line -> line.start));
         cached = next;
-        try {
-            preferences.edit().putString(PREF_KEY, next.toJson().toString()).apply();
+        if (writeSnapshot(next)) {
             result.putBoolean("ok", true);
             result.putInt("line_count", next.lines.size());
-        } catch (Throwable error) {
+        } else {
+            cached = null;
             return failure(result, "歌词缓存写入失败");
         }
         return result;
@@ -104,7 +122,15 @@ final class LyricsStateStore implements LyricsProvider {
 
     private Snapshot load() {
         if (cached != null) return cached;
-        String raw = preferences.getString(PREF_KEY, "");
+        String raw = "";
+        try {
+            if (snapshotFile.getBaseFile().isFile()) {
+                raw = new String(snapshotFile.readFully(), StandardCharsets.UTF_8);
+            }
+        } catch (Throwable ignored) {
+            raw = "";
+        }
+        if (raw.isEmpty()) raw = preferences.getString(PREF_KEY, "");
         if (raw == null || raw.isEmpty()) return null;
         try {
             cached = Snapshot.fromJson(new JSONObject(raw));
@@ -112,6 +138,19 @@ final class LyricsStateStore implements LyricsProvider {
             cached = null;
         }
         return cached;
+    }
+
+    private boolean writeSnapshot(Snapshot value) {
+        FileOutputStream output = null;
+        try {
+            output = snapshotFile.startWrite();
+            output.write(value.toJson().toString().getBytes(StandardCharsets.UTF_8));
+            snapshotFile.finishWrite(output);
+            return true;
+        } catch (Throwable error) {
+            if (output != null) snapshotFile.failWrite(output);
+            return false;
+        }
     }
 
     static int findLine(List<Line> lines, long position) {

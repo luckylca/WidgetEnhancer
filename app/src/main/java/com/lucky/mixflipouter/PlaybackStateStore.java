@@ -7,6 +7,8 @@ import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.service.notification.NotificationListenerService;
 
@@ -19,12 +21,15 @@ final class PlaybackStateStore implements PlaybackProvider {
     private static final Object LOCK = new Object();
     private static final PlaybackStateStore INSTANCE = new PlaybackStateStore();
     private static final long SYSTEM_SCAN_INTERVAL_MS = 1_000L;
+    private static final Handler CALLBACK_HANDLER = new Handler(Looper.getMainLooper());
     private static final List<MediaController> controllers = new ArrayList<>();
     private static MediaController activeController;
     private static Snapshot snapshot = new Snapshot();
     private static MediaSessionManager sessionManager;
     private static ComponentName listenerComponent;
     private static long lastSystemScanElapsed;
+    private static long refreshCount;
+    private static long lastRefreshElapsed;
 
     private static final MediaController.Callback CALLBACK = new MediaController.Callback() {
         @Override public void onPlaybackStateChanged(PlaybackState state) { refresh(); }
@@ -98,6 +103,8 @@ final class PlaybackStateStore implements PlaybackProvider {
             out.putLong("duration", value.duration);
             out.putFloat("speed", value.speed);
             out.putLong("updated_elapsed", value.updatedElapsed);
+            out.putLong("refresh_count", refreshCount);
+            out.putLong("last_refresh_elapsed", lastRefreshElapsed);
             out.putBoolean("artwork_available", PlaybackArtworkStore.available());
             out.putLong("artwork_revision", PlaybackArtworkStore.revision());
             return out;
@@ -197,6 +204,8 @@ final class PlaybackStateStore implements PlaybackProvider {
             }
         }
         snapshot = next;
+        refreshCount++;
+        lastRefreshElapsed = SystemClock.elapsedRealtime();
     }
 
     private static MediaController choose(List<MediaController> availableControllers,
@@ -221,7 +230,8 @@ final class PlaybackStateStore implements PlaybackProvider {
 
     private static void registerCallbacksLocked() {
         for (MediaController controller : controllers) {
-            try { controller.registerCallback(CALLBACK); } catch (Throwable ignored) {}
+            try { controller.registerCallback(CALLBACK, CALLBACK_HANDLER); }
+            catch (Throwable ignored) {}
         }
     }
 

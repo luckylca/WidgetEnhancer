@@ -2,11 +2,14 @@ package com.lucky.mixflipouter;
 
 import android.app.Activity;
 import android.app.Application;
+import android.app.BroadcastOptions;
+import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -30,20 +33,51 @@ final class NeteaseLyricHook {
     private static final int MAX_LINES = 320;
     private static final int MAX_TEXT_LENGTH = 240;
     private static final long RETRY_INTERVAL_MS = 5_000;
+    private static final long STATUS_WATCHDOG_INTERVAL_MS = 3_000;
+    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
     private static final AtomicBoolean INSTALLED = new AtomicBoolean();
+    private static final AtomicBoolean SERVICE_ATTACH_HOOK_INSTALLED = new AtomicBoolean();
+    private static final AtomicBoolean RUNTIME_ADAPTER_INSTALLED = new AtomicBoolean();
     private static final AtomicBoolean REPORT_SENT = new AtomicBoolean();
     private static final AtomicBoolean SEND_IN_FLIGHT = new AtomicBoolean();
     private static final AtomicBoolean LOAD_CALLBACK_SEEN = new AtomicBoolean();
     private static final AtomicBoolean TIMER_CALLBACK_SEEN = new AtomicBoolean();
-    private static final AtomicBoolean STATUS_ACTIVATED = new AtomicBoolean();
     private static final AtomicBoolean STATUS_REQUEST_IN_FLIGHT = new AtomicBoolean();
     private static long lastRequestedMusicId;
+    private static long lastPublishedMusicId;
+    private static long lastStatusRequestElapsed;
     private static String lastPublishedKey = "";
     private static String lastAttemptKey = "";
     private static long lastAttemptElapsed;
+    private static volatile Object statusWatchdogService;
+    private static volatile Class<?> statusWatchdogControllerClass;
+    private static volatile Class<?> statusWatchdogLyricLoaderClass;
+    private static final Runnable STATUS_WATCHDOG = new Runnable() {
+        @Override
+        public void run() {
+            Object service = statusWatchdogService;
+            Class<?> controllerClass = statusWatchdogControllerClass;
+            Class<?> lyricLoaderClass = statusWatchdogLyricLoaderClass;
+            if (service == null || controllerClass == null || lyricLoaderClass == null) return;
+            try {
+                Object musicInfo = XposedHelpers.callMethod(service, "getCurrentMusic");
+                if (musicInfo != null) {
+                    Object controller = XposedHelpers.callStaticMethod(controllerClass, "j");
+                    requestStatusLyricsForMusic(lyricLoaderClass, musicInfo, controller);
+                }
+            } catch (Throwable error) {
+                logError("NetEase status lyric watchdog failed", error);
+            } finally {
+                if (statusWatchdogService == service) {
+                    MAIN_HANDLER.postDelayed(this, STATUS_WATCHDOG_INTERVAL_MS);
+                }
+            }
+        }
+    };
 
     static void install(ClassLoader loader) {
         if (!INSTALLED.compareAndSet(false, true)) return;
+        installServiceAttachHook();
 
         ArrayList<String> installed = new ArrayList<>();
         ArrayList<String> failures = new ArrayList<>();
@@ -68,6 +102,53 @@ final class NeteaseLyricHook {
         XposedBridge.log("MixFlipCustom: NetEase lyric adapter "
                 + (ok ? "installed: " + String.join(",", installed)
                 : "failed: " + String.join(",", failures)));
+    }
+
+    /** NetEase can replace its base ClassLoader with Tinker after the package hook runs. */
+    private static void installServiceAttachHook() {
+        if (!SERVICE_ATTACH_HOOK_INSTALLED.compareAndSet(false, true)) return;
+        try {
+            XposedBridge.hookAllMethods(Service.class, "attach", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam hook) {
+                    Object service = hook.thisObject;
+                    if (service == null
+                            || !PLAY_SERVICE_CLASS.equals(service.getClass().getName())) return;
+                    attachRuntimePlayService(service);
+                }
+            });
+        } catch (Throwable error) {
+            logError("NetEase service attach hook failed", error);
+        }
+    }
+
+    private static void attachRuntimePlayService(Object service) {
+        try {
+            ClassLoader loader = service.getClass().getClassLoader();
+            Class<?> controllerClass = XposedHelpers.findClass(STATUS_CONTROLLER_CLASS, loader);
+            Class<?> lyricLoaderClass = XposedHelpers.findClass(LOADER_CLASS, loader);
+            if (RUNTIME_ADAPTER_INSTALLED.compareAndSet(false, true)) {
+                ArrayList<String> installed = new ArrayList<>();
+                ArrayList<String> failures = new ArrayList<>();
+                Class<?> infoClass = XposedHelpers.findClass(INFO_CLASS, loader);
+                hookLoader(loader, infoClass, installed, failures);
+                hookConsumer(loader, infoClass, installed, failures);
+                hookPlayService(controllerClass, lyricLoaderClass,
+                        service.getClass(), installed, failures);
+                XposedBridge.log("MixFlipCustom: NetEase runtime lyric adapter installed: "
+                        + String.join(",", installed));
+                if (!failures.isEmpty()) {
+                    XposedBridge.log("MixFlipCustom: NetEase runtime lyric adapter warnings: "
+                            + String.join(" / ", failures));
+                }
+            }
+            startStatusWatchdog(controllerClass, lyricLoaderClass, service);
+            scheduleStatusControllerInitialization(
+                    controllerClass, lyricLoaderClass, service, 0, 250);
+        } catch (Throwable error) {
+            RUNTIME_ADAPTER_INSTALLED.set(false);
+            logError("NetEase runtime play service attachment failed", error);
+        }
     }
 
     private static void hookLoader(ClassLoader loader, Class<?> infoClass,
@@ -159,6 +240,8 @@ final class NeteaseLyricHook {
             XposedHelpers.findAndHookMethod(serviceClass, "onCreate", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam hook) {
+                    startStatusWatchdog(
+                            controllerClass, lyricLoaderClass, hook.thisObject);
                     scheduleStatusControllerInitialization(
                             controllerClass, lyricLoaderClass,
                             hook.thisObject, 0, 1_500);
@@ -168,6 +251,19 @@ final class NeteaseLyricHook {
         } catch (Throwable error) {
             failures.add("play-service=" + error.getClass().getSimpleName());
             logError("NetEase play service hook failed", error);
+        }
+
+        try {
+            XposedBridge.hookAllMethods(serviceClass, "onDestroy", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam hook) {
+                    stopStatusWatchdog(hook.thisObject);
+                }
+            });
+            installed.add("play-watchdog");
+        } catch (Throwable error) {
+            failures.add("play-watchdog=" + error.getClass().getSimpleName());
+            logError("NetEase play service watchdog cleanup hook failed", error);
         }
 
         try {
@@ -240,12 +336,26 @@ final class NeteaseLyricHook {
             failures.add("music-info=" + error.getClass().getSimpleName());
             logError("NetEase music info hook failed", error);
         }
+
+        try {
+            Object existingService = XposedHelpers.getStaticObjectField(
+                    serviceClass, "sPlayService");
+            if (existingService != null) {
+                startStatusWatchdog(controllerClass, lyricLoaderClass, existingService);
+                scheduleStatusControllerInitialization(
+                        controllerClass, lyricLoaderClass, existingService, 0, 250);
+                installed.add("existing-play-service");
+            }
+        } catch (Throwable error) {
+            failures.add("existing-play-service=" + error.getClass().getSimpleName());
+            logError("NetEase existing play service attachment failed", error);
+        }
     }
 
     private static void scheduleMusicRequest(Class<?> controllerClass,
                                              Class<?> lyricLoaderClass,
                                              Object musicInfo) {
-        new Handler(Looper.getMainLooper()).post(() -> {
+        MAIN_HANDLER.post(() -> {
             try {
                 Object controller = XposedHelpers.callStaticMethod(controllerClass, "j");
                 requestStatusLyricsForMusic(lyricLoaderClass, musicInfo, controller);
@@ -258,7 +368,7 @@ final class NeteaseLyricHook {
     private static void scheduleStatusControllerInitialization(
             Class<?> controllerClass, Class<?> lyricLoaderClass,
             Object service, int attempt, long delayMs) {
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+        MAIN_HANDLER.postDelayed(() -> {
             if (!initializeStatusController(
                     controllerClass, lyricLoaderClass, service) && attempt < 4) {
                 scheduleStatusControllerInitialization(
@@ -266,6 +376,24 @@ final class NeteaseLyricHook {
                         service, attempt + 1, 1_500);
             }
         }, delayMs);
+    }
+
+    private static void startStatusWatchdog(Class<?> controllerClass,
+                                            Class<?> lyricLoaderClass,
+                                            Object service) {
+        statusWatchdogControllerClass = controllerClass;
+        statusWatchdogLyricLoaderClass = lyricLoaderClass;
+        statusWatchdogService = service;
+        MAIN_HANDLER.removeCallbacks(STATUS_WATCHDOG);
+        MAIN_HANDLER.postDelayed(STATUS_WATCHDOG, STATUS_WATCHDOG_INTERVAL_MS);
+    }
+
+    private static void stopStatusWatchdog(Object service) {
+        if (statusWatchdogService != service) return;
+        statusWatchdogService = null;
+        statusWatchdogControllerClass = null;
+        statusWatchdogLyricLoaderClass = null;
+        MAIN_HANDLER.removeCallbacks(STATUS_WATCHDOG);
     }
 
     private static boolean initializeStatusController(
@@ -301,9 +429,14 @@ final class NeteaseLyricHook {
         try {
             long musicId = number(XposedHelpers.callMethod(musicInfo, "getFilterMusicId"));
             if (musicId <= 0) return false;
+            long now = SystemClock.elapsedRealtime();
             synchronized (NeteaseLyricHook.class) {
-                if (STATUS_ACTIVATED.get() && musicId == lastRequestedMusicId) return true;
+                if (musicId == lastPublishedMusicId) return true;
+                if (musicId == lastRequestedMusicId
+                        && now - lastStatusRequestElapsed < RETRY_INTERVAL_MS) return true;
                 if (!STATUS_REQUEST_IN_FLIGHT.compareAndSet(false, true)) return false;
+                lastRequestedMusicId = musicId;
+                lastStatusRequestElapsed = now;
                 requestStarted = true;
             }
             XposedHelpers.setBooleanField(controller, "d", true);
@@ -313,14 +446,9 @@ final class NeteaseLyricHook {
             request = XposedHelpers.callMethod(request, "m", false);
             request = XposedHelpers.callMethod(request, "o", false);
             XposedHelpers.callMethod(request, "k");
-            synchronized (NeteaseLyricHook.class) {
-                lastRequestedMusicId = musicId;
-                STATUS_ACTIVATED.set(true);
-            }
             XposedBridge.log("MixFlipCustom: NetEase status lyric consumer activated");
             return true;
         } catch (Throwable error) {
-            STATUS_ACTIVATED.set(false);
             logError("NetEase status consumer activation failed", error);
             return false;
         } finally {
@@ -403,7 +531,7 @@ final class NeteaseLyricHook {
                 return;
             }
             Intent intent = bridgeIntent(NeteaseLyricsReceiver.ACTION_PUBLISH, payload);
-            context.sendOrderedBroadcast(intent, null, new BroadcastReceiver() {
+            BroadcastReceiver resultReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context ignored, Intent resultIntent) {
                     try {
@@ -412,19 +540,25 @@ final class NeteaseLyricHook {
                             int count = result == null ? 0 : result.getInt("line_count", 0);
                             synchronized (NeteaseLyricHook.class) {
                                 lastPublishedKey = key;
+                                if (count > 0) {
+                                    lastPublishedMusicId = payload.getLong("music_id", 0);
+                                }
                             }
                             XposedBridge.log(
                                     "MixFlipCustom: published NetEase lyric timing, lines=" + count);
                         } else {
-                            XposedBridge.log(
-                                    "MixFlipCustom: lyric bridge rejected publication");
+                            Bundle result = getResultExtras(false);
+                            String message = result == null ? ""
+                                    : result.getString("message", "");
+                            XposedBridge.log("MixFlipCustom: lyric bridge rejected publication"
+                                    + (message.isEmpty() ? "" : ": " + message));
                         }
                     } finally {
                         SEND_IN_FLIGHT.set(false);
                     }
                 }
-            }, new Handler(Looper.getMainLooper()), Activity.RESULT_CANCELED,
-                    null, null);
+            };
+            sendOrderedBridge(context, intent, resultReceiver);
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: lyric publish failed: " + error);
             SEND_IN_FLIGHT.set(false);
@@ -457,15 +591,14 @@ final class NeteaseLyricHook {
             extras.putString("stage", "lyrics");
             extras.putBoolean("ok", ok);
             extras.putString("message", message);
-            context.sendOrderedBroadcast(
-                    bridgeIntent(NeteaseLyricsReceiver.ACTION_REPORT, extras), null,
+            sendOrderedBridge(context,
+                    bridgeIntent(NeteaseLyricsReceiver.ACTION_REPORT, extras),
                     new BroadcastReceiver() {
                         @Override
                         public void onReceive(Context ignored, Intent intent) {
                             if (getResultCode() != Activity.RESULT_OK) REPORT_SENT.set(false);
                         }
-                    }, new Handler(Looper.getMainLooper()), Activity.RESULT_CANCELED,
-                    null, null);
+                    });
         } catch (Throwable error) {
             REPORT_SENT.set(false);
             XposedBridge.log("MixFlipCustom: NetEase health report failed: " + error);
@@ -477,6 +610,21 @@ final class NeteaseLyricHook {
                 .setComponent(new ComponentName(Contract.MODULE_PACKAGE,
                         NeteaseLyricsReceiver.class.getName()))
                 .putExtra(NeteaseLyricsReceiver.EXTRA_PAYLOAD, payload);
+    }
+
+    private static void sendOrderedBridge(Context context, Intent intent,
+                                          BroadcastReceiver resultReceiver) {
+        Handler handler = MAIN_HANDLER;
+        if (Build.VERSION.SDK_INT >= 34) {
+            Bundle options = BroadcastOptions.makeBasic()
+                    .setShareIdentityEnabled(true)
+                    .toBundle();
+            context.sendOrderedBroadcast(intent, null, options, resultReceiver, handler,
+                    Activity.RESULT_CANCELED, null, null);
+            return;
+        }
+        context.sendOrderedBroadcast(intent, null, resultReceiver, handler,
+                Activity.RESULT_CANCELED, null, null);
     }
 
     private static Object call(Object target, String method) {
