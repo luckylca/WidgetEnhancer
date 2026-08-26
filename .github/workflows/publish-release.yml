@@ -1,0 +1,71 @@
+name: Publish Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish 18-0.7.1-p1]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
+
+      - name: Prepare APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.7.1-p1.apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/release-notes.md <<'EOF'
+          ## WidgetEnhancer 0.7.1-p1
+
+          为 Xiaomi MIX Flip 外屏提供自定义小部件能力的 LSPosed 模块。
+
+          ### 主要功能
+          - 媒体小部件：支持图片与循环视频展示
+          - 音乐小部件：支持歌曲信息、同步歌词与媒体手势控制
+          - 快捷按钮小部件：支持 1～6 个按钮及多种系统操作
+          - 自定义小部件接入 HyperOS 原生外屏小部件管理流程
+          - 支持小部件创建、编辑、删除、预览与导入
+          - 支持网易云音乐歌词适配与可选 SystemUI 快捷设置能力
+
+          ### LSPosed 作用域
+          必选：`com.miui.fliphome`
+
+          可选：
+          - `com.netease.cloudmusic`
+          - `com.android.systemui`
+
+          安装后请在 LSPosed 中启用模块并重启设备。
+          EOF
+
+          gh release create "18-0.7.1-p1" \
+            "dist/WidgetEnhancer-0.7.1-p1.apk" \
+            --target "$GITHUB_SHA" \
+            --title "WidgetEnhancer 0.7.1-p1" \
+            --notes-file /tmp/release-notes.md
