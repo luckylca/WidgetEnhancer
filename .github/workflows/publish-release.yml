@@ -1,17 +1,17 @@
 name: Publish Release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   release:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish 18-0.7.1-p1]')
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == '[publish-release] 18-0.7.1-p1'
     runs-on: ubuntu-latest
 
     steps:
@@ -69,3 +69,11 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "WidgetEnhancer 0.7.1-p1" \
             --notes-file /tmp/release-notes.md
+
+      - name: Close trigger issue
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue close "$ISSUE_NUMBER" --comment "Release 18-0.7.1-p1 published automatically."
