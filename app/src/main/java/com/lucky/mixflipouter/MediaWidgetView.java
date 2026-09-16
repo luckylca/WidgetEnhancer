@@ -60,6 +60,8 @@ final class MediaWidgetView extends FrameLayout {
     private final List<ProgressBinding> progressBindings = new ArrayList<>();
     private final List<AlbumBinding> albumBindings = new ArrayList<>();
     private final List<PlaybackBinding> lyricBindings = new ArrayList<>();
+    private NotificationListView notificationList;
+    private final List<View> appWidgetLayers = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final GestureDetector musicGestures;
     private final ButtonLayoutEngine.Layout shortcutLayout;
@@ -100,6 +102,14 @@ final class MediaWidgetView extends FrameLayout {
             mainHandler.postDelayed(this, 500L);
         }
     };
+    private final Runnable notificationTicker = new Runnable() {
+        @Override
+        public void run() {
+            if (!runtimeVisible()) return;
+            updateNotificationBindings();
+            mainHandler.postDelayed(this, 1_000L);
+        }
+    };
     private final Runnable volumeRepeat = new Runnable() {
         @Override
         public void run() {
@@ -120,8 +130,7 @@ final class MediaWidgetView extends FrameLayout {
         String widgetType = WidgetTypeRegistry.resolve(config);
         shortcutLayout = WidgetTypeRegistry.SHORTCUTS.equals(widgetType)
                 ? shortcutLayout(config) : null;
-        setBackgroundColor(WidgetTypeRegistry.SHORTCUTS.equals(widgetType)
-                ? Color.TRANSPARENT : Color.BLACK);
+        setBackgroundColor(transparentBackground(widgetType) ? Color.TRANSPARENT : Color.BLACK);
         if (interactive && WidgetTypeRegistry.MUSIC.equals(widgetType)) {
             musicGestures = new GestureDetector(context,
                     new GestureDetector.SimpleOnGestureListener() {
@@ -160,6 +169,12 @@ final class MediaWidgetView extends FrameLayout {
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         applyOfficialWidgetOutline();
         createComponentLayers();
+    }
+
+    private static boolean transparentBackground(String widgetType) {
+        return WidgetTypeRegistry.SHORTCUTS.equals(widgetType)
+                || WidgetTypeRegistry.NOTIFICATIONS.equals(widgetType)
+                || WidgetTypeRegistry.APPWIDGET.equals(widgetType);
     }
 
     private void createComponentLayers() {
@@ -277,7 +292,61 @@ final class MediaWidgetView extends FrameLayout {
             }
             return button;
         }
+        if (WidgetComponent.TYPE_NOTIFICATION_LIST.equals(component.type)) {
+            notificationList = new NotificationListView(getContext(), interactive);
+            notificationList.setCallback(new NotificationListView.Callback() {
+                @Override
+                public void onOpen(String key) {
+                    performNotificationAction("open_notification", key);
+                }
+
+                @Override
+                public void onDismiss(String key) {
+                    performNotificationAction("dismiss_notification", key);
+                }
+            });
+            return notificationList;
+        }
+        if (WidgetComponent.TYPE_APPWIDGET.equals(component.type)) {
+            View slot;
+            if (ActionSpec.HOST_MAML.equals(component.actionType)) {
+                slot = new MamlSlotView(getContext(), config.id, component, interactive);
+            } else {
+                slot = new AppWidgetSlotView(getContext(), config.id, component, interactive);
+            }
+            appWidgetLayers.add(slot);
+            return slot;
+        }
         return null;
+    }
+
+    private void performNotificationAction(String method, String key) {
+        if (key == null || key.isEmpty()) return;
+        try {
+            Bundle result = getContext().getContentResolver().call(
+                    Contract.PROVIDER_URI, method, key, null);
+            android.util.Log.i("MixFlipCustom", "notification action " + method
+                    + " ok=" + (result != null && result.getBoolean("ok")));
+            if (result != null && !result.getBoolean("ok")) {
+                String message = result.getString("message", "");
+                if (!message.isEmpty()) {
+                    Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+                }
+            }
+        } catch (Throwable error) {
+            Toast.makeText(getContext(), "通知操作失败：" + error.getMessage(),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void updateNotificationBindings() {
+        if (notificationList == null) return;
+        try {
+            Bundle state = getContext().getContentResolver().call(
+                    Contract.PROVIDER_URI, "get_notifications", null, null);
+            notificationList.setData(state);
+        } catch (Throwable ignored) {
+        }
     }
 
     private ImageView.ScaleType imageScaleType(String fillMode) {
@@ -576,6 +645,7 @@ final class MediaWidgetView extends FrameLayout {
             yieldingToHost = false;
             disallowHostIntercept(true);
         } else if (interactive && action == MotionEvent.ACTION_MOVE && !yieldingToHost
+                && !prioritizeChildGesture(event)
                 && shouldYieldToHost(touchDownX, touchDownY,
                 event.getX(), event.getY(), touchSlop)) {
             yieldingToHost = true;
@@ -619,6 +689,27 @@ final class MediaWidgetView extends FrameLayout {
         float deltaX = currentX - downX;
         float deltaY = currentY - downY;
         return deltaX * deltaX + deltaY * deltaY > touchSlop * (float) touchSlop;
+    }
+
+    /** Horizontal swipes on notification rows or hosted AppWidgets belong to the
+     * layer itself; vertical swipes always page the host widget pager. */
+    private boolean prioritizeChildGesture(MotionEvent event) {
+        float deltaX = Math.abs(event.getX() - touchDownX);
+        float deltaY = Math.abs(event.getY() - touchDownY);
+        if (deltaX <= deltaY) return false;
+        if (notificationList != null && notificationList.getVisibility() == VISIBLE
+                && insideLayer(notificationList, touchDownX, touchDownY)) return true;
+        for (View layer : appWidgetLayers) {
+            if (layer.getVisibility() == VISIBLE
+                    && insideLayer(layer, touchDownX, touchDownY)) return true;
+        }
+        return false;
+    }
+
+    private boolean insideLayer(View layer, float x, float y) {
+        LayoutParams params = (LayoutParams) layer.getLayoutParams();
+        return x >= params.leftMargin && x <= params.leftMargin + params.width
+                && y >= params.topMargin && y <= params.topMargin + params.height;
     }
 
     private void disallowHostIntercept(boolean disallow) {
@@ -669,6 +760,11 @@ final class MediaWidgetView extends FrameLayout {
     private void updateLyricSchedule() {
         mainHandler.removeCallbacks(lyricTicker);
         if (!lyricBindings.isEmpty() && runtimeVisible()) lyricTicker.run();
+    }
+
+    private void updateNotificationSchedule() {
+        mainHandler.removeCallbacks(notificationTicker);
+        if (notificationList != null && runtimeVisible()) notificationTicker.run();
     }
 
     private static int parseColor(String value, int fallback) {
@@ -868,6 +964,7 @@ final class MediaWidgetView extends FrameLayout {
         }
         updatePlaybackSchedule();
         updateLyricSchedule();
+        updateNotificationSchedule();
         if (videoTexture != null && videoTexture.isAvailable() && mediaPlayer == null) {
             createPlayer(videoTexture.getSurfaceTexture());
         } else {
@@ -881,6 +978,7 @@ final class MediaWidgetView extends FrameLayout {
         mainHandler.removeCallbacks(timeTicker);
         mainHandler.removeCallbacks(playbackTicker);
         mainHandler.removeCallbacks(lyricTicker);
+        mainHandler.removeCallbacks(notificationTicker);
         releasePlayer();
         super.onDetachedFromWindow();
     }
@@ -899,6 +997,7 @@ final class MediaWidgetView extends FrameLayout {
         maybePlay();
         updatePlaybackSchedule();
         updateLyricSchedule();
+        updateNotificationSchedule();
     }
 
     @Override
@@ -908,6 +1007,7 @@ final class MediaWidgetView extends FrameLayout {
         maybePlay();
         updatePlaybackSchedule();
         updateLyricSchedule();
+        updateNotificationSchedule();
     }
 
     private int dp(int value) {

@@ -55,6 +55,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".AppWidgetPickerActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".DiagnosticsActivity"
             android:exported="false" />
 
@@ -76,7 +80,7 @@
         <service
             android:name=".PlaybackNotificationListener"
             android:exported="true"
-            android:label="MIX Flip 媒体会话"
+            android:label="MIX Flip 通知与媒体"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />

@@ -80,6 +80,14 @@ public final class ConfigProvider extends ContentProvider {
         if ("list_widgets".equals(method)) return listWidgets();
         if ("get_system_state".equals(method)) return getSystemState();
         if ("get_playback_state".equals(method)) return PlaybackStateStore.provider().snapshot();
+        if ("get_notifications".equals(method)) return NotificationStateStore.snapshot();
+        if ("open_notification".equals(method)) {
+            return NotificationStateStore.open(getContext(), arg);
+        }
+        if ("dismiss_notification".equals(method)) {
+            return NotificationStateStore.dismiss(arg);
+        }
+        if ("set_appwidget_id".equals(method)) return setAppWidgetId(arg, extras);
         if ("get_qs_tiles".equals(method)) return qsTileBridge.snapshot();
         if ("get_lyrics_state".equals(method)) {
             return lyricsProvider.snapshot(PlaybackStateStore.provider().snapshot());
@@ -112,6 +120,41 @@ public final class ConfigProvider extends ContentProvider {
         if (repository.isSafeMode()) return null;
         WidgetConfig config = repository.get(widgetId);
         return config == null ? null : config.toBundle(repository.revision());
+    }
+
+    private synchronized Bundle setAppWidgetId(String widgetId, Bundle extras) {
+        Bundle result = new Bundle();
+        String componentId = extras == null ? null : extras.getString("component_id");
+        int requested = extras == null ? -1 : extras.getInt("app_widget_id", -1);
+        boolean force = extras != null && extras.getBoolean("force", false);
+        if (widgetId == null || componentId == null || requested < -1) {
+            result.putBoolean("ok", false);
+            result.putString("message", "参数不完整");
+            return result;
+        }
+        WidgetConfig config = repository.get(widgetId);
+        WidgetComponent slot = null;
+        if (config != null) {
+            for (WidgetComponent component : config.components) {
+                if (componentId.equals(component.id)
+                        && WidgetComponent.TYPE_APPWIDGET.equals(component.type)) {
+                    slot = component;
+                    break;
+                }
+            }
+        }
+        if (slot == null) {
+            result.putBoolean("ok", false);
+            result.putString("message", "找不到对应的小部件槽位");
+            return result;
+        }
+        if (slot.appWidgetId < 0 || force) {
+            slot.appWidgetId = requested;
+            repository.save(config);
+        }
+        result.putBoolean("ok", true);
+        result.putInt("app_widget_id", slot.appWidgetId);
+        return result;
     }
 
     private Bundle listWidgets() {
@@ -317,6 +360,10 @@ public final class ConfigProvider extends ContentProvider {
         boolean qsReady = qs.getBoolean("bridge_ready");
         out.putBoolean("qs_ok", qsReady);
         if (!qsReady) out.putString("qs_message", "SystemUI QS 桥接未连接或心跳已过期");
+        Bundle notifications = NotificationStateStore.snapshot();
+        out.putInt("notification_count", notifications.getInt("count", 0));
+        out.putLong("notification_revision", notifications.getLong("revision", 0));
+        out.putBoolean("notification_listener_ok", PlaybackNotificationListener.isConnected());
         return out;
     }
 
@@ -328,6 +375,14 @@ public final class ConfigProvider extends ContentProvider {
             File artwork = PlaybackArtworkStore.file(getContext());
             if (artwork.isFile()) return readOnly(artwork);
             throw new FileNotFoundException("No playback artwork");
+        }
+        if ("maml".equals(firstSegment(uri))) {
+            List<String> parts = uri.getPathSegments();
+            File maml = parts.size() >= 3
+                    ? repository.mamlSlotFile(parts.get(1), parts.get(2))
+                    : repository.mamlFile(lastSegment(uri));
+            if (maml.isFile()) return readOnly(maml);
+            throw new FileNotFoundException("No MAML package");
         }
         String kind = lastSegment(uri);
         String widgetId = widgetId(uri);
@@ -358,6 +413,11 @@ public final class ConfigProvider extends ContentProvider {
 
     private static String lastSegment(Uri uri) {
         return uri.getLastPathSegment() == null ? "" : uri.getLastPathSegment();
+    }
+
+    private static String firstSegment(Uri uri) {
+        List<String> parts = uri.getPathSegments();
+        return parts.isEmpty() ? "" : parts.get(0);
     }
 
     private static String widgetId(Uri uri) {

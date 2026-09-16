@@ -10,6 +10,9 @@ final class WidgetTypeRegistry {
     static final String MEDIA = "media";
     static final String MUSIC = "music";
     static final String SHORTCUTS = "shortcuts";
+    static final String NOTIFICATIONS = "notifications";
+    static final String APPWIDGET = "appwidget";
+    static final String MAML = "maml";
 
     private static final List<Type> TYPES;
 
@@ -18,11 +21,24 @@ final class WidgetTypeRegistry {
         types.add(new Type(MEDIA, "媒体展示", "显示一张图片或循环视频"));
         types.add(new Type(MUSIC, "音乐", "歌词与媒体控制"));
         types.add(new Type(SHORTCUTS, "快捷按钮", "纵向排列系统操作或应用入口"));
+        types.add(new Type(NOTIFICATIONS, "通知", "最近三条通知，点击跳转，左滑删除"));
+        types.add(new Type(APPWIDGET, "应用小部件", "添加手机应用的小部件或 ZIP 小部件包，自由组合尺寸"));
+        types.add(new Type(MAML, "系统小部件", "导入 ZIP / 主题商店的小部件包"));
         TYPES = Collections.unmodifiableList(types);
     }
 
     static List<Type> all() {
         return TYPES;
+    }
+
+    /** Types offered when creating a widget; MAML packages are imported as slots
+     * inside an appwidget page instead of as a standalone page type. */
+    static List<Type> creatable() {
+        ArrayList<Type> out = new ArrayList<>();
+        for (Type type : TYPES) {
+            if (!MAML.equals(type.id)) out.add(type);
+        }
+        return Collections.unmodifiableList(out);
     }
 
     static Type get(String id) {
@@ -35,6 +51,14 @@ final class WidgetTypeRegistry {
         if (config != null) {
             for (WidgetComponent component : config.components) {
                 if (isPlaybackComponent(component)) return MUSIC;
+            }
+            for (WidgetComponent component : config.components) {
+                if (WidgetComponent.TYPE_NOTIFICATION_LIST.equals(component.type)) {
+                    return NOTIFICATIONS;
+                }
+            }
+            for (WidgetComponent component : config.components) {
+                if (WidgetComponent.TYPE_APPWIDGET.equals(component.type)) return APPWIDGET;
             }
             if (WidgetComponent.TYPE_IMAGE.equals(config.mediaType)
                     || WidgetComponent.TYPE_VIDEO.equals(config.mediaType)) return MEDIA;
@@ -58,6 +82,12 @@ final class WidgetTypeRegistry {
             config.components.add(WidgetComponent.button(
                     "按钮 1", ActionSpec.LAUNCH_APP, "", 0, 0, 0, 0, 0));
             buildShortcutLayout(config);
+        } else if (NOTIFICATIONS.equals(id)) {
+            buildNotificationLayout(config);
+        } else if (APPWIDGET.equals(id)) {
+            buildAppWidgetLayout(config);
+        } else if (MAML.equals(id)) {
+            buildMamlLayout(config);
         }
         config.syncLegacyActionsFromComponents();
         return config;
@@ -71,8 +101,75 @@ final class WidgetTypeRegistry {
             buildMusicLayout(config);
         } else if (SHORTCUTS.equals(config.typeId)) {
             buildShortcutLayout(config);
+        } else if (NOTIFICATIONS.equals(config.typeId)) {
+            buildNotificationLayout(config);
+        } else if (APPWIDGET.equals(config.typeId)) {
+            buildAppWidgetLayout(config);
+        } else if (MAML.equals(config.typeId)) {
+            buildMamlLayout(config);
         }
         config.syncLegacyActionsFromComponents();
+    }
+
+    static void buildMamlLayout(WidgetConfig config) {
+        config.mediaType = "none";
+        config.mimeType = "application/octet-stream";
+        config.components.clear();
+    }
+
+    static void buildNotificationLayout(WidgetConfig config) {
+        config.mediaType = "none";
+        config.mimeType = "application/octet-stream";
+        config.components.clear();
+        config.components.add(component(WidgetComponent.TYPE_NOTIFICATION_LIST,
+                "", 0, 0, WidgetConfig.CANVAS_WIDTH, WidgetConfig.CANVAS_HEIGHT, 0, 24));
+    }
+
+    static void buildAppWidgetLayout(WidgetConfig config) {
+        config.mediaType = "none";
+        config.mimeType = "application/octet-stream";
+        ArrayList<WidgetComponent> slots = new ArrayList<>();
+        for (WidgetComponent component : config.components) {
+            if (WidgetComponent.TYPE_APPWIDGET.equals(component.type)) slots.add(component);
+        }
+        config.components.clear();
+        float cellWidth = AppWidgetLayoutEngine.cellWidth(WidgetConfig.CANVAS_WIDTH);
+        float cellHeight = AppWidgetLayoutEngine.cellHeight(WidgetConfig.CANVAS_HEIGHT);
+        boolean[][] occupied = new boolean[AppWidgetLayoutEngine.GRID_ROWS]
+                [AppWidgetLayoutEngine.GRID_COLS];
+        float gap = 6f;
+        for (int index = 0; index < slots.size(); index++) {
+            WidgetComponent slot = slots.get(index);
+            int[] size = AppWidgetLayoutEngine.parseSize(slot.content);
+            if (size == null) size = new int[]{1, 1};
+            slot.content = AppWidgetLayoutEngine.formatSize(size[0], size[1]);
+            // Preserve the cell the user dragged this slot to; fall back to first fit.
+            int col = Math.round(slot.x / cellWidth);
+            int row = Math.round(slot.y / cellHeight);
+            col = Math.max(0, Math.min(AppWidgetLayoutEngine.GRID_COLS - size[0], col));
+            row = Math.max(0, Math.min(AppWidgetLayoutEngine.GRID_ROWS - size[1], row));
+            if (!AppWidgetLayoutEngine.areaFree(occupied, col, row, size[0], size[1])) {
+                int[] origin = AppWidgetLayoutEngine.firstFit(occupied, size[0], size[1]);
+                if (origin == null) {
+                    slot.visible = false;
+                    slot.locked = true;
+                    slot.zIndex = index;
+                    config.components.add(slot);
+                    continue;
+                }
+                col = origin[0];
+                row = origin[1];
+            }
+            AppWidgetLayoutEngine.markArea(occupied, col, row, size[0], size[1]);
+            slot.x = col * cellWidth + gap;
+            slot.y = row * cellHeight + gap;
+            slot.width = size[0] * cellWidth - gap * 2;
+            slot.height = size[1] * cellHeight - gap * 2;
+            slot.visible = true;
+            slot.locked = true;
+            slot.zIndex = index;
+            config.components.add(slot);
+        }
     }
 
     static void buildMediaLayout(WidgetConfig config) {
@@ -102,6 +199,7 @@ final class WidgetTypeRegistry {
         config.mediaType = "none";
         config.mimeType = "application/octet-stream";
         config.components.clear();
+        float scale = config.lyricScale;
 
         WidgetComponent background = component(WidgetComponent.TYPE_ALBUM_ART,
                 "", 0, 0, 440, 720, 0, 1);
@@ -119,13 +217,13 @@ final class WidgetTypeRegistry {
         config.components.add(artist);
 
         WidgetComponent previous = component(WidgetComponent.TYPE_LYRIC_PREVIOUS,
-                "上一句歌词", 44, 200, 352, 72, 4, 22);
+                "上一句歌词", 44, 200, 352, 72, 4, 22 * scale);
         previous.color = "#88FFFFFF";
         config.components.add(previous);
         config.components.add(component(WidgetComponent.TYPE_LYRIC_CURRENT,
-                "当前歌词", 34, 278, 372, 120, 5, 32));
+                "当前歌词", 34, 278, 372, 120, 5, 32 * scale));
         WidgetComponent next = component(WidgetComponent.TYPE_LYRIC_NEXT,
-                "下一句歌词", 44, 406, 352, 72, 6, 22);
+                "下一句歌词", 44, 406, 352, 72, 6, 22 * scale);
         next.color = "#99FFFFFF";
         config.components.add(next);
 
@@ -135,6 +233,7 @@ final class WidgetTypeRegistry {
 
     static void ensureThreeLineMusicLayout(WidgetConfig config) {
         if (!MUSIC.equals(resolve(config))) return;
+        float scale = config.lyricScale;
         WidgetComponent previous = null;
         WidgetComponent current = null;
         WidgetComponent next = null;
@@ -151,14 +250,14 @@ final class WidgetTypeRegistry {
         }
         if (previous == null) {
             previous = component(WidgetComponent.TYPE_LYRIC_PREVIOUS,
-                    "上一句歌词", 44, 200, 352, 72, 4, 22);
+                    "上一句歌词", 44, 200, 352, 72, 4, 22 * scale);
             config.components.add(previous);
         }
-        applyLyricFrame(previous, 44, 200, 352, 72, 4, 22, "#88FFFFFF");
+        applyLyricFrame(previous, 44, 200, 352, 72, 4, 22 * scale, "#88FFFFFF");
         if (current != null) applyLyricFrame(
-                current, 34, 278, 372, 120, 5, 32, "#FFFFFFFF");
+                current, 34, 278, 372, 120, 5, 32 * scale, "#FFFFFFFF");
         if (next != null) applyLyricFrame(
-                next, 44, 406, 352, 72, 6, 22, "#99FFFFFF");
+                next, 44, 406, 352, 72, 6, 22 * scale, "#99FFFFFF");
         if (title != null) title.textSize = 24;
         if (artist != null) artist.textSize = 18;
         if (progress != null) progress.zIndex = 7;

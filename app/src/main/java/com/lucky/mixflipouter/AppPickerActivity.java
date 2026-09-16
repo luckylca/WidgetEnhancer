@@ -43,11 +43,8 @@ public final class AppPickerActivity extends Activity {
         TextView title = text("选择要打开的应用", 25,
                 color(com.google.android.material.R.attr.colorOnSurface));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setPadding(0, 0, 0, dp(14));
         page.addView(title);
-        TextView subtitle = text("已按应用名称排序，保存时会记录可启动组件。", 14,
-                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        subtitle.setPadding(0, dp(5), 0, dp(12));
-        page.addView(subtitle);
 
         ListView list = new ListView(this);
         list.setDivider(null);

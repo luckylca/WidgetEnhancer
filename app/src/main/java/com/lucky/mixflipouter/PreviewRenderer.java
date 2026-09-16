@@ -20,7 +20,7 @@ import java.util.Locale;
 final class PreviewRenderer {
     private static final int WIDTH = 440;
     private static final int HEIGHT = 720;
-    private static final int RENDER_VERSION = 7;
+    private static final int RENDER_VERSION = 10;
 
     static File ensure(Context context, WidgetConfig config, File media, long revision) {
         String id = config == null ? "missing" : safeFilePart(config.id);
@@ -38,6 +38,10 @@ final class PreviewRenderer {
                 source = decodeSampled(media);
             } else if (media.isFile() && "video".equals(mediaType)) {
                 source = videoFrame(media);
+            } else if (config != null && WidgetTypeRegistry.MAML.equals(typeId)) {
+                File mamlPreview = new File(context.getFilesDir(),
+                        "widgets/" + safeFilePart(config.id) + "/maml-preview.png");
+                if (mamlPreview.isFile()) source = decodeSampled(mamlPreview);
             }
             render(context, output, source, config);
         } catch (Throwable ignored) {
@@ -143,6 +147,14 @@ final class PreviewRenderer {
             drawShortcutPreview(context, canvas, config);
             return;
         }
+        if (WidgetTypeRegistry.NOTIFICATIONS.equals(typeId)) {
+            drawNotificationPreview(canvas);
+            return;
+        }
+        if (WidgetTypeRegistry.APPWIDGET.equals(typeId)) {
+            drawAppWidgetPreview(canvas, config);
+            return;
+        }
         Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
         accent.setColor(0xffff6900);
         canvas.drawCircle(WIDTH / 2f, 272, 76, accent);
@@ -211,6 +223,68 @@ final class PreviewRenderer {
                 ShortcutIconRenderer.drawSystemIcon(
                         canvas, component.actionType, left, top, iconSize);
             }
+        }
+    }
+
+    private static void drawNotificationPreview(Canvas canvas) {
+        Paint icon = new Paint(Paint.ANTI_ALIAS_FLAG);
+        icon.setColor(0x66ffffff);
+        Paint title = new Paint(Paint.ANTI_ALIAS_FLAG);
+        title.setColor(Color.WHITE);
+        title.setFakeBoldText(true);
+        title.setTextSize(34);
+        Paint content = new Paint(Paint.ANTI_ALIAS_FLAG);
+        content.setColor(0xb3ffffff);
+        content.setTextSize(26);
+        String[][] samples = {
+                {"微信", "晚上一起吃饭？"},
+                {"短信", "验证码 483920"},
+                {"系统更新", "新版本可用"}
+        };
+        float rowHeight = HEIGHT / 3f;
+        for (int i = 0; i < 3; i++) {
+            float centerY = i * rowHeight + rowHeight / 2f;
+            float iconSize = rowHeight * 0.46f;
+            float iconLeft = rowHeight * 0.14f;
+            canvas.drawRoundRect(iconLeft, centerY - iconSize / 2f,
+                    iconLeft + iconSize, centerY + iconSize / 2f,
+                    iconSize * 0.3f, iconSize * 0.3f, icon);
+            float textLeft = iconLeft + iconSize + rowHeight * 0.14f;
+            canvas.drawText(samples[i][0], textLeft, centerY - rowHeight * 0.04f, title);
+            canvas.drawText(samples[i][1], textLeft, centerY + rowHeight * 0.17f, content);
+        }
+    }
+
+    private static void drawAppWidgetPreview(Canvas canvas, WidgetConfig config) {
+        if (config == null) return;
+        Paint box = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setColor(0xccffffff);
+        text.setTextSize(22);
+        boolean any = false;
+        for (WidgetComponent component : config.components) {
+            if (!WidgetComponent.TYPE_APPWIDGET.equals(component.type) || !component.visible) {
+                continue;
+            }
+            any = true;
+            float left = component.x + 6;
+            float top = component.y + 6;
+            float right = component.x + component.width - 6;
+            float bottom = component.y + component.height - 6;
+            box.setColor(0x2effffff);
+            canvas.drawRoundRect(left, top, right, bottom, 24, 24, box);
+            box.setStyle(Paint.Style.STROKE);
+            box.setStrokeWidth(2f);
+            box.setColor(0x55ffffff);
+            canvas.drawRoundRect(left, top, right, bottom, 24, 24, box);
+            box.setStyle(Paint.Style.FILL);
+            canvas.drawText(AppWidgetLayoutEngine.sizeLabel(component.content),
+                    (left + right) / 2f, (top + bottom) / 2f + 8, text);
+        }
+        if (!any) {
+            text.setTextSize(25);
+            canvas.drawText("在编辑器中添加应用小部件", WIDTH / 2f, HEIGHT / 2f, text);
         }
     }
 

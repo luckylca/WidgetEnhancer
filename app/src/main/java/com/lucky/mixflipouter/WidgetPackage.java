@@ -33,7 +33,8 @@ final class WidgetPackage {
                              String widgetId, Uri destination) throws Exception {
         WidgetConfig config = repository.get(widgetId);
         if (config == null) throw new IllegalArgumentException("找不到要导出的 Widget");
-        File media = repository.mediaFile(widgetId);
+        File media = WidgetTypeRegistry.MAML.equals(WidgetTypeRegistry.resolve(config))
+                ? repository.mamlFile(widgetId) : repository.mediaFile(widgetId);
         boolean hasMedia = media.isFile();
         JSONObject manifest = new JSONObject()
                 .put("format", "mixflipwidget")
@@ -113,11 +114,18 @@ final class WidgetPackage {
             if (expectedSize != temporaryMedia.length()) throw new IllegalArgumentException("媒体大小校验失败");
             if (!expectedHash.equals(sha256(temporaryMedia))) throw new IllegalArgumentException("媒体 SHA-256 校验失败");
         }
-        WidgetConfig imported = WidgetConfig.fromJson(
-                new JSONObject(new String(widgetBytes, StandardCharsets.UTF_8)));
+        JSONObject importedJson = new JSONObject(new String(widgetBytes, StandardCharsets.UTF_8));
+        WidgetConfig imported = WidgetConfig.fromJson(importedJson);
         sanitize(imported, mediaSeen);
         imported.syncLegacyActionsFromComponents();
-        return repository.importPackage(imported, mediaSeen ? temporaryMedia : null);
+        WidgetConfig result = repository.importPackage(imported, mediaSeen ? temporaryMedia : null);
+        if (WidgetTypeRegistry.MAML.equals(WidgetTypeRegistry.resolve(result))) {
+            File importedMedia = repository.mediaFile(result.id);
+            if (importedMedia.isFile()) {
+                importedMedia.renameTo(repository.mamlFile(result.id));
+            }
+        }
+        return result;
         } finally {
             temporaryMedia.delete();
         }
@@ -126,6 +134,10 @@ final class WidgetPackage {
     static void sanitize(WidgetConfig config, boolean hasMedia) {
         config.name = bounded(config.name, 80);
         config.typeId = WidgetTypeRegistry.resolve(config);
+        config.lyricScale = clamp(config.lyricScale, 0.5f, 2f);
+        if (WidgetTypeRegistry.MAML.equals(config.typeId) && !hasMedia) {
+            config.enabled = false;
+        }
         config.enabled = config.enabled && (!isMedia(config.mediaType) || hasMedia);
         if (!hasMedia && isMedia(config.mediaType)) {
             config.mediaType = "none";
@@ -163,6 +175,15 @@ final class WidgetPackage {
                 component.actionType = "";
                 component.actionValue = "";
             }
+            if (WidgetComponent.TYPE_APPWIDGET.equals(component.type)) {
+                component.appWidgetId = -1;
+                if (AppWidgetLayoutEngine.parseSize(component.content) == null) {
+                    component.content = "2x2";
+                }
+                if (!ActionSpec.HOST_MAML.equals(component.actionType)) {
+                    component.actionType = ActionSpec.HOST_APPWIDGET;
+                }
+            }
         }
     }
 
@@ -175,7 +196,9 @@ final class WidgetPackage {
                 || WidgetComponent.TYPE_LYRIC_CURRENT.equals(type)
                 || WidgetComponent.TYPE_LYRIC_NEXT.equals(type)
                 || WidgetComponent.TYPE_PLAYBACK_PROGRESS.equals(type)
-                || WidgetComponent.TYPE_ALBUM_ART.equals(type);
+                || WidgetComponent.TYPE_ALBUM_ART.equals(type)
+                || WidgetComponent.TYPE_NOTIFICATION_LIST.equals(type)
+                || WidgetComponent.TYPE_APPWIDGET.equals(type);
     }
 
     private static float finiteClamp(float value, float min, float max, float fallback) {

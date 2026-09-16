@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.UUID;
 
 final class WidgetRepository {
-    static final int SCHEMA_VERSION = 3;
+    static final int SCHEMA_VERSION = 4;
     private static final Object LOCK = new Object();
     private static final String STORE_FILE = "widgets-v1.json";
     private static final String ASSET_ROOT = "widgets";
@@ -156,6 +156,18 @@ final class WidgetRepository {
 
     File mediaFile(String id) {
         return new File(widgetDir(id), "media");
+    }
+
+    File mamlFile(String id) {
+        return new File(widgetDir(id), "maml.mtz");
+    }
+
+    File mamlPreviewFile(String id) {
+        return new File(widgetDir(id), "maml-preview.png");
+    }
+
+    File mamlSlotFile(String widgetId, String componentId) {
+        return new File(widgetDir(widgetId), "maml-" + componentId + ".mtz");
     }
 
     void importMedia(String id, Uri source) throws Exception {

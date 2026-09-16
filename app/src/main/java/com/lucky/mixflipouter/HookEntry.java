@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
+import java.io.File;
 import java.util.List;
 import java.util.Map;
 
@@ -68,10 +69,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     int added = 0;
                     for (WidgetConfig config : configs) {
                         if (!config.enabled) continue;
+                        if (WidgetTypeRegistry.MAML.equals(
+                                WidgetTypeRegistry.resolve(config))) {
+                            Object info = createMamlWidgetInfo(loader, context, config,
+                                    widgets.size());
+                            if (info != null) {
+                                widgets.add(info);
+                                added++;
+                            }
+                            continue;
+                        }
                         Object info = createWidgetInfo(infoClass, config, widgets.size());
                         widgets.add(info);
                         added++;
                     }
+                    cleanupStaleMamlImports(context, configs);
                     if (added == 0) {
                         report(context, "catalogue", false, "没有已启用的自定义 Widget");
                         return;
@@ -85,6 +97,113 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
         });
+    }
+
+    /** Copies an imported MAML package into FlipHome's own res dir and lets the
+     * native loader build the catalogue entry for it. */
+    private static Object createMamlWidgetInfo(ClassLoader loader, Context context,
+                                               WidgetConfig config, int priority) {
+        if (context == null) return null;
+        try {
+            String fileName = Contract.mamlFileName(config.id);
+            if (!ensureMamlInstalled(context, config, fileName)) {
+                report(context, "catalogue", false, "MAML 包尚未就绪: " + config.name);
+                return null;
+            }
+            Class<?> compatClass = XposedHelpers.findClass(MAML_COMPAT_CLASS, loader);
+            Context deviceContext = context.createDeviceProtectedStorageContext();
+            Object info = XposedHelpers.callStaticMethod(compatClass, "createWidgetInfo", fileName);
+            if (info == null) {
+                report(context, "catalogue", false, "MAML 包里没有 2x3 小部件: " + config.name);
+                return null;
+            }
+            XposedHelpers.setIntField(info, "mShowInSetPage", priority);
+            rememberMamlInstall(deviceContext, fileName);
+            return info;
+        } catch (Throwable error) {
+            report(context, "catalogue", false, "MAML 导入失败: " + error.getClass().getSimpleName());
+            XposedBridge.log("MixFlipCustom: maml catalogue entry failed: " + error);
+            return null;
+        }
+    }
+
+    private static boolean ensureMamlInstalled(Context context, WidgetConfig config,
+                                               String fileName) {
+        try {
+            Context deviceContext = context.createDeviceProtectedStorageContext();
+            File resDir = new File(deviceContext.getFilesDir(), "maml/res");
+            File mtz = new File(resDir, fileName + ".mtz");
+            File extracted = new File(resDir, fileName);
+            if (mtz.isFile() || extracted.isDirectory()) return true;
+            resDir.mkdirs();
+            File temporary = new File(resDir, fileName + ".tmp");
+            try (java.io.InputStream in = context.getContentResolver().openInputStream(
+                    Contract.mamlUri(config.id));
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(temporary, false)) {
+                if (in == null) return false;
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = in.read(buffer)) >= 0) out.write(buffer, 0, count);
+                out.getFD().sync();
+            } catch (Throwable error) {
+                temporary.delete();
+                return false;
+            }
+            if (!temporary.renameTo(mtz)) {
+                temporary.delete();
+                return false;
+            }
+            return true;
+        } catch (Throwable error) {
+            return false;
+        }
+    }
+
+    private static void rememberMamlInstall(Context deviceContext, String fileName) {
+        deviceContext.getSharedPreferences("mixflip_maml_imports", 0)
+                .edit().putBoolean(fileName, true).apply();
+    }
+
+    private static void cleanupStaleMamlImports(Context context, List<WidgetConfig> configs) {
+        if (context == null) return;
+        try {
+            Context deviceContext = context.createDeviceProtectedStorageContext();
+            android.content.SharedPreferences prefs =
+                    deviceContext.getSharedPreferences("mixflip_maml_imports", 0);
+            java.util.Set<String> live = new java.util.HashSet<>();
+            for (WidgetConfig config : configs) {
+                String type = WidgetTypeRegistry.resolve(config);
+                if (WidgetTypeRegistry.MAML.equals(type)) {
+                    live.add(Contract.mamlFileName(config.id));
+                } else if (WidgetTypeRegistry.APPWIDGET.equals(type)) {
+                    for (WidgetComponent component : config.components) {
+                        if (ActionSpec.HOST_MAML.equals(component.actionType)) {
+                            live.add("mixflip_mamls_" + component.id);
+                        }
+                    }
+                }
+            }
+            boolean changed = false;
+            for (String installed : prefs.getAll().keySet()) {
+                if (live.contains(installed)) continue;
+                File resDir = new File(deviceContext.getFilesDir(), "maml/res");
+                deleteTree(new File(resDir, installed + ".mtz"));
+                deleteTree(new File(resDir, installed));
+                prefs.edit().remove(installed).apply();
+                changed = true;
+            }
+            if (changed) XposedBridge.log("MixFlipCustom: stale MAML imports cleaned");
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void deleteTree(File file) {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) for (File child : children) deleteTree(child);
+        }
+        file.delete();
     }
 
     private static void hookGroupTitle(ClassLoader loader) {

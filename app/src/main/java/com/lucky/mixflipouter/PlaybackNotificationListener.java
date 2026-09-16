@@ -66,17 +66,20 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
             PlaybackStateStore.clear();
             startWatchdog();
         }
+        NotificationStateStore.attach(this);
     }
 
     @Override
     public void onNotificationPosted(StatusBarNotification notification) {
         super.onNotificationPosted(notification);
+        NotificationStateStore.onPosted(notification);
         scheduleNotificationRefresh(notification);
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification notification) {
         super.onNotificationRemoved(notification);
+        NotificationStateStore.onRemoved(notification);
         scheduleNotificationRefresh(notification);
     }
 
@@ -89,6 +92,8 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
             catch (Throwable ignored) {}
         }
         PlaybackStateStore.clear();
+        NotificationStateStore.detach(this);
+        NotificationStateStore.clear();
         super.onListenerDisconnected();
     }
 

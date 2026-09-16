@@ -188,7 +188,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private void showCreateDialog() {
-        List<WidgetTypeRegistry.Type> types = WidgetTypeRegistry.all();
+        List<WidgetTypeRegistry.Type> types = WidgetTypeRegistry.creatable();
         String[] labels = new String[types.size()];
         for (int i = 0; i < types.size(); i++) labels[i] = types.get(i).name;
         new MaterialAlertDialogBuilder(this)

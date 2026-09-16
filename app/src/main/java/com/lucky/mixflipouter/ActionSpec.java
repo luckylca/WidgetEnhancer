@@ -18,6 +18,8 @@ final class ActionSpec {
     static final String MEDIA_PLAY_PAUSE = "media_play_pause";
     static final String MEDIA_NEXT = "media_next";
     static final String QS_TILE = "qs_tile";
+    static final String HOST_APPWIDGET = "host_appwidget";
+    static final String HOST_MAML = "host_maml";
 
     static boolean requiresValue(String type) {
         return LAUNCH_APP.equals(type) || OPEN_URI.equals(type)

@@ -5,8 +5,6 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.RenderEffect;
-import android.graphics.Shader;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
@@ -40,6 +38,8 @@ public final class WidgetEditorActivity extends Activity {
     private static final int PICK_VIDEO = 1002;
     private static final int PICK_APP = 1003;
     private static final int PICK_QS_TILE = 1004;
+    private static final int PICK_APPWIDGET = 1005;
+    private static final int PICK_MAML_ZIP = 1006;
     private static final int MAX_SHORTCUTS = ButtonLayoutEngine.MAX_BUTTONS;
 
     private static final String[] SYSTEM_ACTION_LABELS = {
@@ -65,7 +65,10 @@ public final class WidgetEditorActivity extends Activity {
     private MaterialButton portraitButton;
     private MaterialButton landscapeButton;
     private LinearLayout shortcutList;
-    private FrameLayout shortcutPreviewHolder;
+    private AppWidgetGridEditorView gridEditor;
+    private FrameLayout previewHolder;
+    private com.google.android.material.slider.Slider lyricSizeSlider;
+    private TextView lyricSizeValue;
     private ScrollView scroll;
     private String pendingShortcutId;
 
@@ -129,6 +132,12 @@ public final class WidgetEditorActivity extends Activity {
             createMusicEditor(root);
         } else if (WidgetTypeRegistry.SHORTCUTS.equals(type.id)) {
             createShortcutEditor(root);
+        } else if (WidgetTypeRegistry.NOTIFICATIONS.equals(type.id)) {
+            createNotificationEditor(root);
+        } else if (WidgetTypeRegistry.APPWIDGET.equals(type.id)) {
+            createAppWidgetEditor(root);
+        } else if (WidgetTypeRegistry.MAML.equals(type.id)) {
+            createMamlEditor(root);
         }
 
         MaterialButton save = button("保存", v -> saveValues());
@@ -187,48 +196,42 @@ public final class WidgetEditorActivity extends Activity {
     }
 
     private void createMusicEditor(LinearLayout root) {
-        section(root, "音乐预览");
-        FrameLayout preview = new FrameLayout(this);
-        preview.setBackgroundColor(0xFF17181D);
-        ImageView artwork = new ImageView(this);
-        artwork.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        artwork.setAlpha(0.62f);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            artwork.setRenderEffect(RenderEffect.createBlurEffect(
-                    dp(18), dp(18), Shader.TileMode.CLAMP));
-        }
-        preview.addView(artwork, new FrameLayout.LayoutParams(-1, -1));
-
-        LinearLayout lyrics = new LinearLayout(this);
-        lyrics.setOrientation(LinearLayout.VERTICAL);
-        lyrics.setGravity(Gravity.CENTER);
-        lyrics.setPadding(dp(26), dp(24), dp(26), dp(24));
-        TextView previous = text("上一句歌词", 19, 0x88FFFFFF);
-        previous.setGravity(Gravity.CENTER);
-        previous.setPadding(0, 0, 0, dp(12));
-        lyrics.addView(previous, matchWrap());
-        TextView current = text("当前歌词", 27, Color.WHITE);
-        current.setGravity(Gravity.CENTER);
-        lyrics.addView(current, matchWrap());
-        TextView next = text("下一句歌词", 19, 0xAAFFFFFF);
-        next.setGravity(Gravity.CENTER);
-        next.setPadding(0, dp(12), 0, 0);
-        lyrics.addView(next, matchWrap());
-        preview.addView(lyrics, new FrameLayout.LayoutParams(-1, -1));
-        root.addView(preview, new LinearLayout.LayoutParams(-1, dp(360)));
-        loadPlaybackArtwork(artwork);
+        section(root, "外屏预览");
+        addLivePreview(root);
 
         TextView lyricStatus = text("歌词来源：网易云音乐", 14,
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         lyricStatus.setPadding(0, dp(12), 0, 0);
         root.addView(lyricStatus);
+
+        section(root, "歌词大小");
+        lyricSizeValue = text("100%", 14,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        root.addView(lyricSizeValue, matchWrap());
+        lyricSizeSlider = new com.google.android.material.slider.Slider(this);
+        lyricSizeSlider.setValueFrom(0.7f);
+        lyricSizeSlider.setValueTo(1.6f);
+        lyricSizeSlider.setStepSize(0.1f);
+        lyricSizeSlider.addOnChangeListener((slider, value, fromUser) -> {
+            config.lyricScale = value;
+            lyricSizeValue.setText(Math.round(value * 100) + "%（当前句歌词大小）");
+            WidgetTypeRegistry.ensureThreeLineMusicLayout(config);
+            scheduleLivePreviewRefresh();
+        });
+        root.addView(lyricSizeSlider, matchWrap());
     }
+
+    private void scheduleLivePreviewRefresh() {
+        if (previewHolder == null) return;
+        previewHolder.removeCallbacks(livePreviewRefresh);
+        previewHolder.postDelayed(livePreviewRefresh, 200L);
+    }
+
+    private final Runnable livePreviewRefresh = this::renderShortcutPreview;
 
     private void createShortcutEditor(LinearLayout root) {
         section(root, "外屏预览");
-        shortcutPreviewHolder = new FrameLayout(this);
-        shortcutPreviewHolder.setBackgroundColor(0xFF59645C);
-        root.addView(shortcutPreviewHolder, new LinearLayout.LayoutParams(-1, dp(380)));
+        addLivePreview(root);
 
         section(root, "快捷按钮");
         shortcutList = new LinearLayout(this);
@@ -240,14 +243,196 @@ public final class WidgetEditorActivity extends Activity {
         root.addView(add, addParams);
     }
 
+    private void createNotificationEditor(LinearLayout root) {
+        section(root, "外屏预览");
+        addLivePreview(root);
+    }
+
+    private void createMamlEditor(LinearLayout root) {
+        section(root, "预览");
+        ImageView preview = new ImageView(this);
+        preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        preview.setBackgroundColor(0xFF17181D);
+        root.addView(preview, new LinearLayout.LayoutParams(-1, dp(380)));
+        File previewFile = repository.mamlPreviewFile(config.id);
+        if (previewFile.isFile()) {
+            preview.setImageBitmap(BitmapFactory.decodeFile(previewFile.getAbsolutePath()));
+        }
+        TextView hint = text("由系统原生渲染，到外屏「小部件」列表里添加即可。", 14,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        hint.setPadding(0, dp(12), 0, 0);
+        root.addView(hint);
+    }
+
+    private void createAppWidgetEditor(LinearLayout root) {
+        section(root, "外屏格子（按住槽位拖动摆放）");
+        gridEditor = new AppWidgetGridEditorView(this);
+        gridEditor.setCallback(new AppWidgetGridEditorView.Callback() {
+            @Override
+            public String slotLabel(WidgetComponent slot) {
+                return WidgetEditorActivity.this.slotLabel(slot);
+            }
+
+            @Override
+            public void onSlotTap(WidgetComponent slot) {
+                showSlotActions(slot);
+            }
+
+            @Override
+            public void onSlotsChanged() {
+                refreshAppWidgetGrid();
+            }
+        });
+        root.addView(gridEditor, matchWrap());
+
+        MaterialButton add = outlinedButton("＋ 添加应用小部件", v -> addAppWidgetSlot());
+        LinearLayout.LayoutParams addParams = matchWrap();
+        addParams.topMargin = dp(14);
+        root.addView(add, addParams);
+        MaterialButton importZip = outlinedButton("导入 ZIP 到格子", v -> beginImportSlotZip());
+        LinearLayout.LayoutParams zipParams = matchWrap();
+        zipParams.topMargin = dp(8);
+        root.addView(importZip, zipParams);
+
+        TextView hint = text("按住槽位拖动摆放，点按可调整尺寸、圆角或删除；首次在外屏显示需按提示授权。", 14,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        hint.setPadding(0, dp(12), 0, 0);
+        root.addView(hint);
+    }
+
+    private void showSlotActions(WidgetComponent slot) {
+        java.util.ArrayList<String> items = new java.util.ArrayList<>();
+        java.util.ArrayList<Runnable> actions = new java.util.ArrayList<>();
+        items.add("调整尺寸");
+        actions.add(() -> chooseSlotSize(slot));
+        items.add("圆角：" + (slot.cornerEnabled ? "开" : "关"));
+        actions.add(() -> {
+            slot.cornerEnabled = !slot.cornerEnabled;
+            showSlotActions(slot);
+        });
+        items.add("删除");
+        actions.add(() -> deleteAppWidgetSlot(slot));
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(slotLabel(slot))
+                .setItems(items.toArray(new String[0]),
+                        (dialog, which) -> actions.get(which).run())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void refreshAppWidgetGrid() {
+        if (gridEditor == null) return;
+        WidgetTypeRegistry.buildAppWidgetLayout(config);
+        gridEditor.setConfig(config);
+    }
+
+    private void addLivePreview(LinearLayout root) {
+        previewHolder = new FrameLayout(this);
+        previewHolder.setBackgroundColor(0xFF59645C);
+        root.addView(previewHolder, new LinearLayout.LayoutParams(-1, dp(380)));
+    }
+
+    private void addAppWidgetSlot() {
+        startActivityForResult(new Intent(this, AppWidgetPickerActivity.class), PICK_APPWIDGET);
+    }
+
+    private void beginImportSlotZip() {
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*"), PICK_MAML_ZIP);
+    }
+
+    private String queryDisplayName(Uri uri) {
+        try (android.database.Cursor cursor = getContentResolver().query(uri, null,
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(
+                        android.provider.OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) {
+                    String name = cursor.getString(index);
+                    if (name != null) return name.replaceAll("\\.(zip|mtz)$", "");
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private void chooseSlotSize(WidgetComponent component) {
+        int[][] presets = AppWidgetLayoutEngine.SIZE_PRESETS;
+        String[] labels = new String[presets.length];
+        for (int i = 0; i < presets.length; i++) {
+            labels[i] = presets[i][0] + " × " + presets[i][1];
+        }
+        int[] current = AppWidgetLayoutEngine.parseSize(component.content);
+        int checked = -1;
+        for (int i = 0; i < presets.length; i++) {
+            if (current != null && presets[i][0] == current[0] && presets[i][1] == current[1]) {
+                checked = i;
+            }
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("选择尺寸（宽 × 高）")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    component.content = AppWidgetLayoutEngine.formatSize(
+                            presets[which][0], presets[which][1]);
+                    dialog.dismiss();
+                    refreshAppWidgetGrid();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void deleteAppWidgetSlot(WidgetComponent component) {
+        config.components.remove(component);
+        if (ActionSpec.HOST_MAML.equals(component.actionType)) {
+            repository.mamlSlotFile(config.id, component.id).delete();
+        }
+        refreshAppWidgetGrid();
+    }
+
+    private String slotLabel(WidgetComponent slot) {
+        if (ActionSpec.HOST_MAML.equals(slot.actionType)) {
+            return slot.actionValue.isEmpty() ? "ZIP 小部件" : slot.actionValue;
+        }
+        return appWidgetLabel(slot.actionValue);
+    }
+
+    private String appWidgetLabel(String flattened) {
+        if (flattened == null || flattened.isEmpty()) return "未绑定小部件";
+        android.content.ComponentName provider = android.content.ComponentName
+                .unflattenFromString(flattened);
+        if (provider == null) return flattened;
+        try {
+            android.appwidget.AppWidgetManager manager = android.appwidget.AppWidgetManager
+                    .getInstance(this);
+            for (android.appwidget.AppWidgetProviderInfo info : manager.getInstalledProviders()) {
+                if (provider.equals(info.provider)) {
+                    String label = info.loadLabel(getPackageManager());
+                    return label == null || label.isEmpty() ? provider.getPackageName() : label;
+                }
+            }
+            return getPackageManager().getApplicationLabel(
+                    getPackageManager().getApplicationInfo(provider.getPackageName(), 0)).toString();
+        } catch (Throwable ignored) {
+            return provider.getPackageName();
+        }
+    }
+
     private void loadValues() {
         enabledSwitch.setChecked(config.enabled);
         nameInput.setText(config.name);
         if (loopSwitch != null) loopSwitch.setChecked(config.loop);
         if (muteSwitch != null) muteSwitch.setChecked(config.mute);
+        if (lyricSizeSlider != null) {
+            lyricSizeSlider.setValue(config.lyricScale);
+            lyricSizeValue.setText(Math.round(config.lyricScale * 100) + "%（当前句歌词大小）");
+        }
         if (mediaPreview != null) loadMediaPreview();
         updateMediaStatus();
         renderShortcuts();
+        renderShortcutPreview();
+        refreshAppWidgetGrid();
     }
 
     private void saveValues() {
@@ -314,12 +499,12 @@ public final class WidgetEditorActivity extends Activity {
     }
 
     private void renderShortcutPreview() {
-        if (shortcutPreviewHolder == null) return;
-        shortcutPreviewHolder.removeAllViews();
+        if (previewHolder == null) return;
+        previewHolder.removeAllViews();
         MediaWidgetView preview = new MediaWidgetView(this, config, false);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(220), dp(360),
                 Gravity.CENTER);
-        shortcutPreviewHolder.addView(preview, params);
+        previewHolder.addView(preview, params);
     }
 
     private void chooseSystemAction(WidgetComponent component) {
@@ -398,6 +583,40 @@ public final class WidgetEditorActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode != RESULT_OK || data == null) return;
+        if (requestCode == PICK_MAML_ZIP) {
+            if (data.getData() == null) return;
+            Uri uri = data.getData();
+            String label = queryDisplayName(uri);
+            WidgetComponent slot = WidgetComponent.mamlSlot(
+                    label == null || label.isEmpty() ? "系统小部件" : label, 2, 2);
+            config.components.add(slot);
+            refreshAppWidgetGrid();
+            Toast.makeText(this, "正在导入…", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                try {
+                    MamlImporter.importSlot(this, repository, config.id, slot.id, uri);
+                    runOnUiThread(this::refreshAppWidgetGrid);
+                } catch (Throwable error) {
+                    runOnUiThread(() -> {
+                        config.components.remove(slot);
+                        refreshAppWidgetGrid();
+                        Toast.makeText(this, "导入失败：" + error.getMessage(),
+                                Toast.LENGTH_LONG).show();
+                    });
+                }
+            }, "maml-slot-import").start();
+            return;
+        }
+        if (requestCode == PICK_APPWIDGET) {
+            String provider = data.getStringExtra(AppWidgetPickerActivity.EXTRA_PROVIDER);
+            int cols = data.getIntExtra(AppWidgetPickerActivity.EXTRA_COLS, 2);
+            int rows = data.getIntExtra(AppWidgetPickerActivity.EXTRA_ROWS, 2);
+            if (provider != null && !provider.isEmpty()) {
+                config.components.add(WidgetComponent.appWidget(provider, cols, rows));
+                refreshAppWidgetGrid();
+            }
+            return;
+        }
         if (requestCode == PICK_APP || requestCode == PICK_QS_TILE) {
             WidgetComponent component = findShortcut(pendingShortcutId);
             pendingShortcutId = null;
@@ -570,23 +789,6 @@ public final class WidgetEditorActivity extends Activity {
         landscapeButton.setChecked(landscape);
         portraitButton.setEnabled(component != null);
         landscapeButton.setEnabled(component != null);
-    }
-
-    private void loadPlaybackArtwork(ImageView view) {
-        new Thread(() -> {
-            Bitmap bitmap = loadBitmap(Contract.PLAYBACK_ARTWORK_URI);
-            runOnUiThread(() -> {
-                if (!isDestroyed() && bitmap != null) view.setImageBitmap(bitmap);
-            });
-        }, "editor-artwork-preview").start();
-    }
-
-    private Bitmap loadBitmap(Uri uri) {
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
-            return BitmapFactory.decodeStream(input);
-        } catch (Throwable ignored) {
-            return null;
-        }
     }
 
     private void section(LinearLayout root, String value) {

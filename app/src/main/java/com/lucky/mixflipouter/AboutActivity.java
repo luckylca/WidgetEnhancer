@@ -96,7 +96,7 @@ public final class AboutActivity extends Activity {
 
         root.addView(sectionTitle("权限与系统访问"), marginTop(dp(22)));
         LinearLayout permissions = addGroup(root);
-        mediaAccessStatus = addRow(permissions, "媒体会话访问", "正在检查…",
+        mediaAccessStatus = addRow(permissions, "通知与媒体访问", "正在检查…",
                 v -> startSafely(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)), true);
         addDivider(permissions);
         cameraStatus = addRow(permissions, "相机与手电筒", "正在检查…",

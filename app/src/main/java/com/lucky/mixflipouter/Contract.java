@@ -14,8 +14,10 @@ final class Contract {
     static final Uri LYRICS_URI = Uri.parse("content://" + AUTHORITY + "/lyrics");
     static final Uri QS_URI = Uri.parse("content://" + AUTHORITY + "/qs");
     static final Uri PLAYBACK_ARTWORK_URI = Uri.parse("content://" + AUTHORITY + "/playback/artwork");
+    static final Uri NOTIFICATIONS_URI = Uri.parse("content://" + AUTHORITY + "/notifications");
     static final String CUSTOM_TYPE = "mixflip_custom";
     static final String WIDGET_FILE_PREFIX = "mixflip_custom_widget_";
+    static final String MAML_FILE_PREFIX = "mixflip_maml_";
     static final String DEFAULT_WIDGET_ID = "default";
     static final String RUNTIME_VIEW_TAG = "mixflip_custom_runtime_overlay";
     static final String PREFS = "outer_widget";
@@ -34,6 +36,19 @@ final class Contract {
         return previewUri(widgetId).buildUpon()
                 .appendQueryParameter("revision", Long.toString(revision))
                 .build();
+    }
+
+    static Uri mamlUri(String widgetId) {
+        return Uri.parse("content://" + AUTHORITY + "/maml/" + Uri.encode(widgetId));
+    }
+
+    static Uri mamlSlotUri(String widgetId, String componentId) {
+        return Uri.parse("content://" + AUTHORITY + "/maml/" + Uri.encode(widgetId)
+                + "/" + Uri.encode(componentId));
+    }
+
+    static String mamlFileName(String widgetId) {
+        return MAML_FILE_PREFIX + widgetId;
     }
 
     static String widgetFileName(String widgetId) {

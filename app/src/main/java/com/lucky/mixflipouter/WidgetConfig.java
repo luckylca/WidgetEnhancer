@@ -23,6 +23,7 @@ final class WidgetConfig {
     String mimeType = "application/octet-stream";
     boolean loop = true;
     boolean mute = true;
+    float lyricScale = 1f;
     final String[] labels = new String[Contract.BUTTON_COUNT];
     final String[] actionTypes = new String[Contract.BUTTON_COUNT];
     final String[] actionValues = new String[Contract.BUTTON_COUNT];
@@ -78,6 +79,7 @@ final class WidgetConfig {
         out.putString("mime_type", mimeType);
         out.putBoolean("loop", loop);
         out.putBoolean("mute", mute);
+        out.putFloat("lyric_scale", lyricScale);
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             out.putString("button_" + i + "_label", labels[i]);
             out.putString("button_" + i + "_type", actionTypes[i]);
@@ -103,6 +105,7 @@ final class WidgetConfig {
         c.mimeType = safe(b.getString("mime_type"), "application/octet-stream");
         c.loop = b.getBoolean("loop", true);
         c.mute = b.getBoolean("mute", true);
+        c.lyricScale = clampScale(b.getFloat("lyric_scale", 1f));
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             c.labels[i] = safe(b.getString("button_" + i + "_label"), "");
             c.actionTypes[i] = safe(b.getString("button_" + i + "_type"), "package");
@@ -132,6 +135,7 @@ final class WidgetConfig {
         JSONObject runtime = new JSONObject();
         runtime.put("loop", loop);
         runtime.put("mute", mute);
+        runtime.put("lyricScale", lyricScale);
         out.put("runtime", runtime);
         JSONObject canvas = new JSONObject();
         canvas.put("width", CANVAS_WIDTH);
@@ -163,6 +167,7 @@ final class WidgetConfig {
         if (runtime != null) {
             c.loop = runtime.optBoolean("loop", true);
             c.mute = runtime.optBoolean("mute", true);
+            c.lyricScale = clampScale((float) runtime.optDouble("lyricScale", 1.0));
         }
         JSONArray actions = in.optJSONArray("actions");
         if (actions != null) {
@@ -351,6 +356,11 @@ final class WidgetConfig {
 
     private static WidgetConfig fromJsonQuietly(JSONObject value) {
         return fromJson(value);
+    }
+
+    private static float clampScale(float value) {
+        if (!Float.isFinite(value)) return 1f;
+        return Math.max(0.5f, Math.min(2f, value));
     }
 
     private static String safe(String value, String fallback) {

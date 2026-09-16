@@ -18,6 +18,8 @@ final class WidgetComponent {
     static final String TYPE_LYRIC_NEXT = "lyric_next";
     static final String TYPE_PLAYBACK_PROGRESS = "playback_progress";
     static final String TYPE_ALBUM_ART = "album_art";
+    static final String TYPE_NOTIFICATION_LIST = "notification_list";
+    static final String TYPE_APPWIDGET = "appwidget";
 
     String id = UUID.randomUUID().toString();
     String type = TYPE_TEXT;
@@ -41,6 +43,29 @@ final class WidgetComponent {
     String textAlign = "center";
     String actionType = "";
     String actionValue = "";
+    int appWidgetId = -1;
+    /** Clip the slot to the outer-screen widget corner radius. */
+    boolean cornerEnabled = true;
+
+    static WidgetComponent appWidget(String provider, int cols, int rows) {
+        WidgetComponent component = new WidgetComponent();
+        component.type = TYPE_APPWIDGET;
+        component.actionType = ActionSpec.HOST_APPWIDGET;
+        component.actionValue = provider == null ? "" : provider;
+        component.content = cols + "x" + rows;
+        component.zIndex = 0;
+        return component;
+    }
+
+    static WidgetComponent mamlSlot(String label, int cols, int rows) {
+        WidgetComponent component = new WidgetComponent();
+        component.type = TYPE_APPWIDGET;
+        component.actionType = ActionSpec.HOST_MAML;
+        component.actionValue = label == null ? "" : label;
+        component.content = cols + "x" + rows;
+        component.zIndex = 0;
+        return component;
+    }
 
     static WidgetComponent media(String type) {
         WidgetComponent component = new WidgetComponent();
@@ -95,6 +120,8 @@ final class WidgetComponent {
         style.put("textAlign", textAlign);
         out.put("style", style);
         out.put("content", content);
+        if (appWidgetId >= 0) out.put("appWidgetId", appWidgetId);
+        if (!cornerEnabled) out.put("cornerEnabled", false);
         if (!actionType.isEmpty() || !actionValue.isEmpty()) {
             JSONObject action = new JSONObject();
             action.put("type", actionType);
@@ -135,6 +162,8 @@ final class WidgetComponent {
             component.textAlign = safe(style.optString("textAlign", null), "center");
         }
         component.content = in.optString("content", "");
+        component.appWidgetId = in.optInt("appWidgetId", -1);
+        component.cornerEnabled = in.optBoolean("cornerEnabled", true);
         JSONObject action = in.optJSONObject("action");
         if (action != null) {
             component.actionType = action.optString("type", "");
