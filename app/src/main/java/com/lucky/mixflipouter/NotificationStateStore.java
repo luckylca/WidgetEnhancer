@@ -22,8 +22,29 @@ final class NotificationStateStore {
     static final int VISIBLE_ENTRIES = 3;
     private static final Object LOCK = new Object();
     private static final List<Entry> entries = new ArrayList<>();
+    private static final long REBIND_MIN_INTERVAL_MS = 30_000L;
+    private static final long RESYNC_MIN_INTERVAL_MS = 2_000L;
     private static long revision;
     private static PlaybackNotificationListener listener;
+    private static long lastRebindRequestElapsed;
+    private static long lastResyncElapsed;
+
+    /**
+     * After a force-stop / app update the system sometimes never re-binds the
+     * enabled notification listener; nudge it when our process is alive but
+     * the listener is not connected. Throttled — NMS logs warnings otherwise.
+     */
+    static void requestRebindIfDisconnected(Context context) {
+        if (context == null || PlaybackNotificationListener.isConnected()) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (now - lastRebindRequestElapsed < REBIND_MIN_INTERVAL_MS) return;
+        lastRebindRequestElapsed = now;
+        try {
+            android.service.notification.NotificationListenerService.requestRebind(
+                    new android.content.ComponentName(context, PlaybackNotificationListener.class));
+        } catch (Throwable ignored) {
+        }
+    }
 
     static final class Entry {
         String key = "";
@@ -87,6 +108,26 @@ final class NotificationStateStore {
         }
     }
 
+    /**
+     * Incremental post/remove callbacks are not reliable (missed while the
+     * process was dead, rewritten keys on MIUI/HyperOS), so the list is
+     * periodically replaced wholesale from the live status bar. This keeps
+     * the widget showing exactly what the status bar shows.
+     */
+    static void resyncFromStatusBar() {
+        PlaybackNotificationListener service = listener;
+        if (service == null) return;
+        seed(activeNotifications(service));
+    }
+
+    /** Throttled variant for poll-driven callers (widget snapshot requests). */
+    static void resyncThrottled() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (now - lastResyncElapsed < RESYNC_MIN_INTERVAL_MS) return;
+        lastResyncElapsed = now;
+        resyncFromStatusBar();
+    }
+
     static long revision() {
         synchronized (LOCK) {
             return revision;
@@ -94,6 +135,7 @@ final class NotificationStateStore {
     }
 
     static Bundle snapshot() {
+        resyncThrottled();
         Bundle out = new Bundle();
         synchronized (LOCK) {
             int count = Math.min(VISIBLE_ENTRIES, entries.size());
@@ -184,6 +226,14 @@ final class NotificationStateStore {
         Notification data = notification.getNotification();
         if (data == null) return null;
         if ((data.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return null;
+        // Filter the resident foreground-service notifications (system junk
+        // like aicr/milink that lives in the shade's folded section), but
+        // keep media controls — the shade surfaces those prominently.
+        // Importance is NOT used: HyperOS shows user-app notifications even
+        // at IMPORTANCE_MIN, so ranking-based filtering diverges from it.
+        if (!isMedia(data) && (data.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) {
+            return null;
+        }
         Entry entry = new Entry();
         entry.key = notification.getKey() == null ? "" : notification.getKey();
         if (entry.key.isEmpty()) return null;
@@ -195,6 +245,12 @@ final class NotificationStateStore {
         entry.clearable = notification.isClearable();
         entry.contentIntent = data.contentIntent;
         return entry;
+    }
+
+    private static boolean isMedia(Notification data) {
+        if (Notification.CATEGORY_TRANSPORT.equals(data.category)) return true;
+        return data.extras != null
+                && data.extras.get(Notification.EXTRA_MEDIA_SESSION) != null;
     }
 
     private static List<StatusBarNotification> activeNotifications(

@@ -44,6 +44,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookCatalogue(param.classLoader, infoClass);
             hookGroupTitle(param.classLoader);
             hookRuntimeHost(param.classLoader, infoClass);
+            hookWallpaperColor(param.classLoader);
             WidgetLimitHook.install(param.classLoader);
             XposedBridge.log("MixFlipCustom: P0 hooks installed");
         } catch (Throwable error) {
@@ -233,6 +234,75 @@ public final class HookEntry implements IXposedHookLoadPackage {
         });
     }
 
+    /**
+     * Follows FlipHome's own backdrop color verdict (same sources native widgets use):
+     * - WallpaperUtils.setCurrentWallpaperColorMode: wallpaper dark/light on the desk
+     * - WidgetBgHelper.onDeskChanged / onAppColorChanged: whether the desk is visible and
+     *   the foreground app's navigation bar color — this is what makes official widgets
+     *   flip when a light-background app (e.g. 时钟) opens on the outer screen.
+     */
+    private static void hookWallpaperColor(ClassLoader loader) {
+        try {
+            Class<?> utils = XposedHelpers.findClass(
+                    "com.miui.fliphome.wallpaper.WallpaperUtils", loader);
+            XposedHelpers.findAndHookMethod(utils, "setCurrentWallpaperColorMode", int.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            int mode = (Integer) hook.args[0];
+                            WallpaperColorState.setDarkWallpaper(mode == 0);
+                            reportBackdrop("wallpaper colorMode=" + mode);
+                        }
+                    });
+            boolean dark = (Boolean) XposedHelpers.callStaticMethod(utils, "hasAppliedDarkWallpaper");
+            WallpaperColorState.setDarkWallpaper(dark);
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: wallpaper color hook unavailable: " + error);
+        }
+        try {
+            Class<?> bgHelper = XposedHelpers.findClass(
+                    "com.miui.fliphome.widget.WidgetBgHelper", loader);
+            Class<?> bgListener = XposedHelpers.findClass(
+                    "com.miui.fliphome.widget.WidgetBgHelper$IBackgroundListener", loader);
+            // The constructor samples the current foreground app color itself; mirror it
+            // so a FlipHome restart while an app is open still starts with the right state.
+            XposedHelpers.findAndHookConstructor(bgHelper, bgListener, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam hook) {
+                    WallpaperColorState.setOnDesk(XposedHelpers.getBooleanField(
+                            hook.thisObject, "isDesk"));
+                    WallpaperColorState.setAppColor(XposedHelpers.getIntField(
+                            hook.thisObject, "appColor"));
+                    reportBackdrop("bgHelper init");
+                }
+            });
+            XposedHelpers.findAndHookMethod(bgHelper, "onDeskChanged", boolean.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            WallpaperColorState.setOnDesk((Boolean) hook.args[0]);
+                            reportBackdrop("onDeskChanged=" + hook.args[0]);
+                        }
+                    });
+            XposedHelpers.findAndHookMethod(bgHelper, "onAppColorChanged", int.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            int color = (Integer) hook.args[0];
+                            WallpaperColorState.setAppColor(color);
+                            reportBackdrop(String.format("appColor=#%08X", color));
+                        }
+                    });
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: widget bg hook unavailable: " + error);
+        }
+    }
+
+    private static void reportBackdrop(String event) {
+        report(currentFlipHomeContext(), "wallpaper", true, event
+                + " 生效=" + (WallpaperColorState.isDarkWallpaper() ? "深色" : "浅色"));
+    }
+
     private static void hookRuntimeHost(ClassLoader loader, Class<?> infoClass) {
         Class<?> compatClass = XposedHelpers.findClass(MAML_COMPAT_CLASS, loader);
         XposedHelpers.findAndHookMethod(compatClass, "createMamlHostView", Context.class, infoClass,
@@ -262,8 +332,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 return;
                             }
                             ViewGroup host = (ViewGroup) hook.getResult();
-                            String widgetId = Contract.widgetIdFromFileName(
-                                    String.valueOf(XposedHelpers.getObjectField(info, "mFileName")));
+                            String fileName = String.valueOf(
+                                    XposedHelpers.getObjectField(info, "mFileName"));
+                            String widgetId = Contract.widgetIdFromFileName(fileName);
                             WidgetConfig config = WidgetConfig.load(context, widgetId);
                             if (config == null) {
                                 report(context, "runtime", false, "找不到 Widget 配置: " + widgetId);
@@ -319,7 +390,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (info == null) return false;
         try {
             Object value = XposedHelpers.getObjectField(info, "mFileName");
-            return value instanceof String && ((String) value).startsWith(Contract.WIDGET_FILE_PREFIX);
+            if (!(value instanceof String)) return false;
+            String fileName = (String) value;
+            return fileName.startsWith(Contract.WIDGET_FILE_PREFIX);
         } catch (Throwable ignored) {
             return false;
         }

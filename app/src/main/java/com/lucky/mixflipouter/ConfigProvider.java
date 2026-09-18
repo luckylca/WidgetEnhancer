@@ -38,6 +38,7 @@ public final class ConfigProvider extends ContentProvider {
         PlaybackArtworkStore.initialize(getContext());
         PlaybackStateStore.initialize(getContext());
         initializeTorch();
+        NotificationStateStore.requestRebindIfDisconnected(getContext());
         return true;
     }
 
@@ -80,7 +81,10 @@ public final class ConfigProvider extends ContentProvider {
         if ("list_widgets".equals(method)) return listWidgets();
         if ("get_system_state".equals(method)) return getSystemState();
         if ("get_playback_state".equals(method)) return PlaybackStateStore.provider().snapshot();
-        if ("get_notifications".equals(method)) return NotificationStateStore.snapshot();
+        if ("get_notifications".equals(method)) {
+            NotificationStateStore.requestRebindIfDisconnected(getContext());
+            return NotificationStateStore.snapshot();
+        }
         if ("open_notification".equals(method)) {
             return NotificationStateStore.open(getContext(), arg);
         }
@@ -350,7 +354,7 @@ public final class ConfigProvider extends ContentProvider {
         SharedPreferences p = prefs();
         Bundle out = new Bundle();
         for (String stage : new String[]{
-                "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs"
+                "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs", "wallpaper"
         }) {
             out.putBoolean(stage + "_ok", p.getBoolean("hook_" + stage + "_ok", false));
             out.putString(stage + "_message", p.getString("hook_" + stage + "_message", "尚未收到上报"));

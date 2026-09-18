@@ -14,6 +14,7 @@ import java.util.List;
 public final class PlaybackNotificationListener extends NotificationListenerService {
     private static final long SESSION_WATCHDOG_INTERVAL_MS = 1_500L;
     private static final long NOTIFICATION_REFRESH_DELAY_MS = 150L;
+    private static final long NOTIFICATION_RESYNC_DELAY_MS = 250L;
     private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
     private static volatile PlaybackNotificationListener watchdogOwner;
     private static volatile long watchdogRefreshCount;
@@ -24,6 +25,13 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
         PlaybackNotificationListener owner = watchdogOwner;
         if (owner != null && owner.listenerConnected) owner.refreshSessions();
     };
+    /**
+     * Post/remove callbacks are unreliable on MIUI/HyperOS (missed while the
+     * process was dead, rewritten keys), so every change also schedules a
+     * debounced full re-seed from getActiveNotifications() to keep the feed
+     * identical to the status bar.
+     */
+    private static final Runnable NOTIFICATION_RESYNC = NotificationStateStore::resyncFromStatusBar;
     private static final Runnable SESSION_WATCHDOG = new Runnable() {
         @Override
         public void run() {
@@ -73,6 +81,7 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
     public void onNotificationPosted(StatusBarNotification notification) {
         super.onNotificationPosted(notification);
         NotificationStateStore.onPosted(notification);
+        scheduleNotificationResync();
         scheduleNotificationRefresh(notification);
     }
 
@@ -80,7 +89,16 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
     public void onNotificationRemoved(StatusBarNotification notification) {
         super.onNotificationRemoved(notification);
         NotificationStateStore.onRemoved(notification);
+        scheduleNotificationResync();
         scheduleNotificationRefresh(notification);
+    }
+
+    @Override
+    public void onNotificationRankingUpdate(RankingMap rankingMap) {
+        super.onNotificationRankingUpdate(rankingMap);
+        // Rankings can change without post/remove events; re-seed so the
+        // feed stays in sync with the shade.
+        scheduleNotificationResync();
     }
 
     @Override
@@ -134,6 +152,11 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
         }
     }
 
+    private void scheduleNotificationResync() {
+        MAIN_HANDLER.removeCallbacks(NOTIFICATION_RESYNC);
+        MAIN_HANDLER.postDelayed(NOTIFICATION_RESYNC, NOTIFICATION_RESYNC_DELAY_MS);
+    }
+
     private void scheduleNotificationRefresh(StatusBarNotification notification) {
         if (notification == null
                 || !Contract.NETEASE_PACKAGE.equals(notification.getPackageName())) return;
@@ -153,6 +176,7 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
         if (watchdogOwner != this) return;
         watchdogOwner = null;
         MAIN_HANDLER.removeCallbacks(NOTIFICATION_REFRESH);
+        MAIN_HANDLER.removeCallbacks(NOTIFICATION_RESYNC);
         MAIN_HANDLER.removeCallbacks(SESSION_WATCHDOG);
     }
 }

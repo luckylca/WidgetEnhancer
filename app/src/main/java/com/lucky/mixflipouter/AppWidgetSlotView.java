@@ -39,6 +39,15 @@ final class AppWidgetSlotView extends FrameLayout {
     private final boolean hosted;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private TextView placeholder;
+    private GradientDrawable placeholderBg;
+
+    private final WallpaperColorState.Listener wallpaperColorListener =
+            new WallpaperColorState.Listener() {
+                @Override
+                public void onWallpaperColorChanged(boolean darkWallpaper) {
+                    applyWallpaperColors();
+                }
+            };
     private AppWidgetHostView hostView;
     private boolean preparing;
     private int nullInfoTicks;
@@ -360,19 +369,21 @@ final class AppWidgetSlotView extends FrameLayout {
 
     private void showPlaceholder(String message) {
         GradientDrawable shape = new GradientDrawable();
-        shape.setColor(0x1AFFFFFF);
+        shape.setColor(WallpaperColorState.placeholderBgColor());
         shape.setCornerRadius(component.cornerEnabled
                 ? OUTER_WIDGET_CORNER_DP * getResources().getDisplayMetrics().density : 24);
         setBackground(shape);
+        placeholderBg = shape;
         if (placeholder == null) {
             placeholder = new TextView(getContext());
-            placeholder.setTextColor(0xCCFFFFFF);
             placeholder.setGravity(Gravity.CENTER);
             placeholder.setTextSize(TypedValue.COMPLEX_UNIT_PX, 15f
                     * getResources().getDisplayMetrics().density);
             addView(placeholder, new LayoutParams(
                     LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         }
+        placeholder.setTextColor(WallpaperColorState.isDarkWallpaper()
+                ? 0xCCFFFFFF : 0xCC1A1A1A);
         placeholder.setText(message);
     }
 
@@ -397,9 +408,21 @@ final class AppWidgetSlotView extends FrameLayout {
         applySizeOptions();
     }
 
+    /** Recolors placeholder text/background to match FlipHome's wallpaper verdict. */
+    private void applyWallpaperColors() {
+        if (placeholderBg != null) {
+            placeholderBg.setColor(WallpaperColorState.placeholderBgColor());
+        }
+        if (placeholder != null) {
+            placeholder.setTextColor(WallpaperColorState.isDarkWallpaper()
+                    ? 0xCCFFFFFF : 0xCC1A1A1A);
+        }
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        WallpaperColorState.addListener(wallpaperColorListener);
         if (hosted && hostView == null && component.appWidgetId >= 0) {
             mainHandler.removeCallbacks(bindWatcher);
             bindWatcher.run();
@@ -409,6 +432,7 @@ final class AppWidgetSlotView extends FrameLayout {
     @Override
     protected void onDetachedFromWindow() {
         mainHandler.removeCallbacks(bindWatcher);
+        WallpaperColorState.removeListener(wallpaperColorListener);
         super.onDetachedFromWindow();
     }
 }

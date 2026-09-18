@@ -22,7 +22,8 @@ import java.util.Map;
 
 /**
  * Notification layer rendered inside the FlipHome process: newest three
- * notifications, one per row with a two-line title/content text block.
+ * notifications, one per fixed-height row (widget height / 3) stacked from
+ * the top — rows never stretch to fill the widget when fewer are bound.
  * Tap opens the source app, swiping a row left dismisses the notification
  * through the module's notification listener. Fully transparent background.
  */
@@ -59,17 +60,40 @@ final class NotificationListView extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         for (int i = 0; i < ROWS; i++) {
             rows[i] = new RowView(context);
+            // Fixed row height (set in onMeasure to container/ROWS); rows
+            // stack from the top instead of stretching to fill the widget.
             rowContainer.addView(rows[i], new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
         }
         emptyView = new TextView(context);
         emptyView.setText("暂无通知");
-        emptyView.setTextColor(0x99FFFFFF);
+        emptyView.setTextColor(WallpaperColorState.secondaryTextColor());
         emptyView.setGravity(Gravity.CENTER);
         emptyView.setVisibility(GONE);
         addView(emptyView, new LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         setClickable(interactive);
+    }
+
+    private final WallpaperColorState.Listener wallpaperColorListener =
+            new WallpaperColorState.Listener() {
+                @Override
+                public void onWallpaperColorChanged(boolean darkWallpaper) {
+                    emptyView.setTextColor(WallpaperColorState.secondaryTextColor());
+                }
+            };
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        WallpaperColorState.addListener(wallpaperColorListener);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        WallpaperColorState.removeListener(wallpaperColorListener);
+        super.onDetachedFromWindow();
     }
 
     void setCallback(Callback value) {
@@ -228,6 +252,8 @@ final class NotificationListView extends FrameLayout {
     }
 
     private final class RowView extends FrameLayout {
+        private final FrameLayout card;
+        private final android.graphics.drawable.GradientDrawable cardBackground;
         private final ImageView icon;
         private final TextView title;
         private final TextView content;
@@ -239,17 +265,25 @@ final class NotificationListView extends FrameLayout {
 
         RowView(Context context) {
             super(context);
+            // Each notification sits on its own rounded card, matching the
+            // native outer-screen widget look.
+            card = new FrameLayout(context);
+            cardBackground = new android.graphics.drawable.GradientDrawable();
+            cardBackground.setCornerRadius(AppWidgetSlotView.cornerRadiusPx(this));
+            card.setBackground(cardBackground);
+            addView(card, new LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
             icon = new ImageView(context);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(1, 1);
             iconParams.gravity = Gravity.CENTER_VERTICAL;
-            addView(icon, iconParams);
+            card.addView(icon, iconParams);
 
             LinearLayout textColumn = new LinearLayout(context);
             textColumn.setOrientation(LinearLayout.VERTICAL);
             textColumn.setGravity(Gravity.CENTER_VERTICAL);
             title = new TextView(context);
-            title.setTextColor(Color.WHITE);
             title.setSingleLine(true);
             title.setEllipsize(TextUtils.TruncateAt.END);
             title.setIncludeFontPadding(false);
@@ -258,16 +292,19 @@ final class NotificationListView extends FrameLayout {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
             content = new TextView(context);
-            content.setTextColor(0xB3FFFFFF);
             content.setSingleLine(true);
             content.setEllipsize(TextUtils.TruncateAt.END);
             content.setIncludeFontPadding(false);
             textColumn.addView(content, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
-            addView(textColumn, new FrameLayout.LayoutParams(
+            card.addView(textColumn, new FrameLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
             textColumn.setTag("textColumn");
+            // Capsule keeps the fixed light-card look: white background, dark text.
+            cardBackground.setColor(0xFFFFFFFF);
+            title.setTextColor(0xFF1A1A1A);
+            content.setTextColor(0x991A1A1A);
         }
 
         void bind(String rowKey, String packageName, String titleText, String contentText,
@@ -291,12 +328,23 @@ final class NotificationListView extends FrameLayout {
         void applyMetrics(int newIconSize, float newTitleSize, float newContentSize,
                           int rowHeight) {
             int targetIcon = Math.max(1, newIconSize);
+            LinearLayout.LayoutParams rowParams = (LinearLayout.LayoutParams) getLayoutParams();
+            if (rowParams != null && rowParams.height != rowHeight) {
+                rowParams.height = rowHeight;
+                setLayoutParams(rowParams);
+            }
+            int horizontal = Math.max(4, Math.round(rowHeight * 0.08f));
+            FrameLayout.LayoutParams cardParams = (FrameLayout.LayoutParams) card.getLayoutParams();
+            cardParams.leftMargin = horizontal;
+            cardParams.rightMargin = horizontal;
+            cardParams.topMargin = Math.round(rowHeight * 0.05f);
+            cardParams.bottomMargin = Math.round(rowHeight * 0.05f);
+            card.setLayoutParams(cardParams);
             if (iconSize == targetIcon && titleSize == newTitleSize
                     && contentSize == newContentSize) return;
             iconSize = targetIcon;
             titleSize = newTitleSize;
             contentSize = newContentSize;
-            int horizontal = Math.max(4, Math.round(rowHeight * 0.08f));
             FrameLayout.LayoutParams iconParams = (FrameLayout.LayoutParams) icon.getLayoutParams();
             iconParams.width = iconSize;
             iconParams.height = iconSize;
