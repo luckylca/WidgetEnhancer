@@ -2,6 +2,12 @@ name: Publish Release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish GitHub Release after successful build and signature verification'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -55,11 +61,13 @@ jobs:
           echo "Verified release certificate SHA-256: $ACTUAL_CERT_SHA256"
 
       - name: Prepare APK
+        if: ${{ inputs.publish }}
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.3.apk
 
       - name: Publish GitHub Release
+        if: ${{ inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
