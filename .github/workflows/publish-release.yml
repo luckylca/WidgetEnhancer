@@ -9,6 +9,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      WIDGETENHANCER_STORE_PASSWORD: ${{ secrets.WIDGETENHANCER_STORE_PASSWORD }}
+      WIDGETENHANCER_KEY_ALIAS: ${{ secrets.WIDGETENHANCER_KEY_ALIAS }}
+      WIDGETENHANCER_KEY_PASSWORD: ${{ secrets.WIDGETENHANCER_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -23,28 +27,58 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Restore release keystore
+        env:
+          WIDGETENHANCER_KEYSTORE_BASE64: ${{ secrets.WIDGETENHANCER_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$WIDGETENHANCER_KEYSTORE_BASE64"
+          KEYSTORE="$RUNNER_TEMP/widgetenhancer-release.p12"
+          printf '%s' "$WIDGETENHANCER_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          echo "WIDGETENHANCER_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+
       - name: Build release APK
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease
 
+      - name: Verify release signature
+        env:
+          EXPECTED_CERT_SHA256: 996d10e602eb6e0a1cd8a3853128d6ce4d4e456078d93eb2ce27e655d9f89215
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          ACTUAL_CERT_SHA256="$("$APKSIGNER" verify --print-certs "$APK" | awk -F': ' '/certificate SHA-256 digest/{print tolower($NF); exit}')"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
+          echo "Verified release certificate SHA-256: $ACTUAL_CERT_SHA256"
+
       - name: Prepare APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.2.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.3.apk
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > /tmp/release-notes.md <<'EOF'
-          ## WidgetEnhancer 0.8.2
+          ## WidgetEnhancer 0.8.3
 
           为 Xiaomi MIX Flip 外屏提供自定义小部件能力的 LSPosed 模块。
 
           ### 主要更新
-          - 新增免授权小部件绑定
-          - 优化通知跳转
+          - 启用永久固定 Release 签名，修复不同版本间签名不一致的问题
+          - 功能保持与 0.8.2 一致：免授权小部件绑定、通知跳转优化
+
+          ### 重要升级说明
+          0.8.2 及更早版本使用了临时 CI Debug 签名，无法与新的正式签名直接覆盖安装。
+          从旧版升级到 0.8.3 时，需要最后一次卸载旧版后重新安装。
+          **从 0.8.3 开始，后续版本将保持同一正式签名，可正常覆盖升级。**
+
+          正式签名证书 SHA-256：
+          `996d10e602eb6e0a1cd8a3853128d6ce4d4e456078d93eb2ce27e655d9f89215`
 
           ### LSPosed 作用域
           必选：`com.miui.fliphome`
@@ -57,8 +91,8 @@ jobs:
           安装后请在 LSPosed 中启用模块并重启设备。
           EOF
 
-          gh release create "21-0.8.2" \
-            "dist/WidgetEnhancer-0.8.2.apk" \
+          gh release create "22-0.8.3" \
+            "dist/WidgetEnhancer-0.8.3.apk" \
             --target "$GITHUB_SHA" \
-            --title "WidgetEnhancer 0.8.2" \
+            --title "WidgetEnhancer 0.8.3" \
             --notes-file /tmp/release-notes.md

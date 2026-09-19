@@ -1,6 +1,10 @@
 .gradle/
 **/build/
 local.properties
+*.jks
+*.keystore
+*.p12
+signing.env
 .idea/
 *.iml
 .DS_Store

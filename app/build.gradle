@@ -2,6 +2,39 @@ plugins {
     id 'com.android.application'
 }
 
+def localSigning = [:]
+def localSigningFile = new File(System.getProperty('user.home'), '.config/widgetenhancer/signing.env')
+if (localSigningFile.isFile()) {
+    localSigningFile.eachLine { rawLine ->
+        def line = rawLine.trim()
+        if (line && !line.startsWith('#')) {
+            def split = line.indexOf('=')
+            if (split > 0) {
+                localSigning[line.substring(0, split)] = line.substring(split + 1)
+            }
+        }
+    }
+}
+
+def signingValue = { String key ->
+    def envValue = System.getenv(key)
+    if (envValue != null && !envValue.isEmpty()) {
+        return envValue
+    }
+    return localSigning[key]
+}
+
+def releaseKeystorePath = signingValue('WIDGETENHANCER_KEYSTORE_PATH')
+def releaseStorePassword = signingValue('WIDGETENHANCER_STORE_PASSWORD')
+def releaseKeyAlias = signingValue('WIDGETENHANCER_KEY_ALIAS')
+def releaseKeyPassword = signingValue('WIDGETENHANCER_KEY_PASSWORD')
+def hasReleaseSigning = [
+        releaseKeystorePath,
+        releaseStorePassword,
+        releaseKeyAlias,
+        releaseKeyPassword,
+].every { it != null && !it.isEmpty() }
+
 android {
     namespace 'com.lucky.mixflipouter'
     compileSdk 36
@@ -10,20 +43,45 @@ android {
         applicationId 'com.lucky.mixflipouter'
         minSdk 30
         targetSdk 36
-        versionCode 21
-        versionName '0.8.2'
+        versionCode 22
+        versionName '0.8.3'
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                storeType 'PKCS12'
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseRequested = graph.allTasks.any { task ->
+        task.name.toLowerCase().contains('release')
+    }
+    if (releaseRequested && !hasReleaseSigning) {
+        throw new GradleException(
+                'Release signing is not configured. Set WIDGETENHANCER_* signing variables ' +
+                'or create ~/.config/widgetenhancer/signing.env.')
     }
 }
 
