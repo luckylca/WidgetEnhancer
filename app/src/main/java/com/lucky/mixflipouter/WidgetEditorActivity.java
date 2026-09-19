@@ -594,8 +594,13 @@ public final class WidgetEditorActivity extends Activity {
             Toast.makeText(this, "正在导入…", Toast.LENGTH_SHORT).show();
             new Thread(() -> {
                 try {
-                    MamlImporter.importSlot(this, repository, config.id, slot.id, uri);
-                    runOnUiThread(this::refreshAppWidgetGrid);
+                    int[] size = MamlImporter.importSlot(this, repository, config.id, slot.id, uri);
+                    runOnUiThread(() -> {
+                        // The package dictates the slot size (widget_AxB entry).
+                        slot.content = AppWidgetLayoutEngine.formatSize(size[0], size[1]);
+                        repository.save(config);
+                        refreshAppWidgetGrid();
+                    });
                 } catch (Throwable error) {
                     runOnUiThread(() -> {
                         config.components.remove(slot);

@@ -623,12 +623,14 @@ public final class DeviceTestActivity extends Activity {
                     WidgetComponent slot = WidgetComponent.mamlSlot(
                             source.getName().replaceAll("\\.(zip|mtz)$", ""), 2, 2);
                     target.components.add(slot);
-                    MamlImporter.importSlot(this, repository, widgetId, slot.id,
+                    int[] size = MamlImporter.importSlot(this, repository, widgetId, slot.id,
                             android.net.Uri.fromFile(source));
+                    slot.content = AppWidgetLayoutEngine.formatSize(size[0], size[1]);
                     WidgetTypeRegistry.normalize(target);
                     repository.save(target);
                     result.put("ok", true);
                     result.put("component_id", slot.id);
+                    result.put("size", size[0] + "x" + size[1]);
                     result.put("slots", target.components.size());
                 }
             } else if (ACTION_IMPORT_MAML.equals(action)) {

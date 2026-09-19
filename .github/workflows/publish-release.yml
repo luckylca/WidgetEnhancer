@@ -64,7 +64,7 @@ jobs:
         if: ${{ inputs.publish }}
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.3.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.4.apk
 
       - name: Publish GitHub Release
         if: ${{ inputs.publish }}
@@ -72,18 +72,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > /tmp/release-notes.md <<'EOF'
-          ## WidgetEnhancer 0.8.3
+          ## WidgetEnhancer 0.8.4
 
           为 Xiaomi MIX Flip 外屏提供自定义小部件能力的 LSPosed 模块。
 
           ### 主要更新
-          - 启用永久固定 Release 签名，修复不同版本间签名不一致的问题
-          - 功能保持与 0.8.2 一致：免授权小部件绑定、通知跳转优化
+          - 修复导入 MAML 小部件时的尺寸限制
+          - 不再强制要求包内存在 `widget_2x3`，会自动识别 `widget_AxB` 实际尺寸
+          - 支持导入尺寸超出 2×3 外屏网格的 MAML 包，并在外屏槽位内缩放显示
 
-          ### 重要升级说明
-          0.8.2 及更早版本使用了临时 CI Debug 签名，无法与新的正式签名直接覆盖安装。
-          从旧版升级到 0.8.3 时，需要最后一次卸载旧版后重新安装。
-          **从 0.8.3 开始，后续版本将保持同一正式签名，可正常覆盖升级。**
+          ### 签名
+          延续 0.8.3 起启用的固定 Release 签名，可从 0.8.3 直接覆盖升级。
 
           正式签名证书 SHA-256：
           `996d10e602eb6e0a1cd8a3853128d6ce4d4e456078d93eb2ce27e655d9f89215`
@@ -99,8 +98,8 @@ jobs:
           安装后请在 LSPosed 中启用模块并重启设备。
           EOF
 
-          gh release create "22-0.8.3" \
-            "dist/WidgetEnhancer-0.8.3.apk" \
+          gh release create "23-0.8.4" \
+            "dist/WidgetEnhancer-0.8.4.apk" \
             --target "$GITHUB_SHA" \
-            --title "WidgetEnhancer 0.8.3" \
+            --title "WidgetEnhancer 0.8.4" \
             --notes-file /tmp/release-notes.md

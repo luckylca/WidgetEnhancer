@@ -4,8 +4,11 @@ import android.content.Context;
 import android.net.Uri;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -17,11 +20,93 @@ import java.util.zip.ZipInputStream;
 final class MamlImporter {
     private static final long MAX_ZIP_BYTES = 64L * 1024 * 1024;
 
-    /** Validates and stores a MAML package for one grid slot inside an appwidget page. */
-    static void importSlot(Context context, WidgetRepository repository,
-                           String widgetId, String componentId, Uri source) throws Exception {
+    /**
+     * Validates and stores a MAML package for one grid slot inside an appwidget
+     * page. Returns the slot's display size: the largest widget size in the
+     * package that fits the grid, or the full-page 2x3 default when every size
+     * in the package exceeds it (rendering then resolves the package's real
+     * size and scales it into the slot).
+     */
+    static int[] importSlot(Context context, WidgetRepository repository,
+                            String widgetId, String componentId, Uri source) throws Exception {
         validate(context, source);
+        List<int[]> sizes;
+        try (InputStream in = context.getContentResolver().openInputStream(source)) {
+            if (in == null) throw new IllegalStateException("无法读取所选文件");
+            sizes = scanSizes(in);
+        }
+        if (sizes.isEmpty()) {
+            throw new IllegalArgumentException("包里没有可用的小部件（缺少 widget_AxB）");
+        }
         copyTo(context, source, repository.mamlSlotFile(widgetId, componentId));
+        int[] display = largestFitting(sizes);
+        return display == null
+                ? new int[]{AppWidgetLayoutEngine.GRID_COLS, AppWidgetLayoutEngine.GRID_ROWS}
+                : display;
+    }
+
+    /** All widget_AxB sizes declared in the package stream; may exceed the grid. */
+    static List<int[]> scanSizes(InputStream raw) throws Exception {
+        List<int[]> sizes = new ArrayList<>();
+        try (ZipInputStream zip = new ZipInputStream(raw)) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                String name = entry.getName();
+                if (name.endsWith("/")) name = name.substring(0, name.length() - 1);
+                String base = name.contains("/")
+                        ? name.substring(name.lastIndexOf('/') + 1) : name;
+                int[] size = parseWidgetEntrySize(base);
+                if (size != null) sizes.add(size);
+                zip.closeEntry();
+            }
+        }
+        return sizes;
+    }
+
+    static List<int[]> scanSizes(File zipFile) throws Exception {
+        try (InputStream in = new FileInputStream(zipFile)) {
+            return scanSizes(in);
+        }
+    }
+
+    /** Largest size that fits the outer-screen grid, or null when none does. */
+    static int[] largestFitting(List<int[]> sizes) {
+        int[] best = null;
+        for (int[] size : sizes) {
+            if (!AppWidgetLayoutEngine.validSize(size[0], size[1])) continue;
+            if (best == null || size[0] * size[1] > best[0] * best[1]) best = size;
+        }
+        return best;
+    }
+
+    /**
+     * Size to resolve inside the package for a slot with grid size
+     * (slotCols, slotRows): an exact match when the package carries it,
+     * otherwise the largest size available — FlipHome's host view scales it.
+     */
+    static int[] pickResolveSize(List<int[]> sizes, int slotCols, int slotRows) {
+        int[] best = null;
+        for (int[] size : sizes) {
+            if (size[0] == slotCols && size[1] == slotRows) return size;
+            if (best == null || size[0] * size[1] > best[0] * best[1]) best = size;
+        }
+        return best;
+    }
+
+    /** Parses a "widget_2x2"-style entry base name into {cols, rows} (1..9), else null. */
+    static int[] parseWidgetEntrySize(String baseName) {
+        if (baseName == null || !baseName.startsWith("widget_")) return null;
+        String spec = baseName.substring("widget_".length());
+        int split = spec.indexOf('x');
+        if (split <= 0 || split >= spec.length() - 1) return null;
+        try {
+            int cols = Integer.parseInt(spec.substring(0, split));
+            int rows = Integer.parseInt(spec.substring(split + 1));
+            return cols >= 1 && cols <= 9 && rows >= 1 && rows <= 9
+                    ? new int[]{cols, rows} : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     static WidgetConfig importZip(Context context, WidgetRepository repository,

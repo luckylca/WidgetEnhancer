@@ -85,11 +85,22 @@ final class MamlSlotView extends FrameLayout {
         deviceContext.getSharedPreferences("mixflip_maml_imports", 0)
                 .edit().putBoolean(name, true).apply();
         Class<?> compat = Class.forName(COMPAT_CLASS, true, context.getClassLoader());
+        // Resolve a size the package actually carries (getResPathAndUnZip only
+        // matches exact widget_AxB entries): prefer an exact match with this
+        // slot's grid size, otherwise fall back to the package's largest widget
+        // — the host view scales it, and packages may exceed the 2x3 grid.
+        int[] slotSize = AppWidgetLayoutEngine.parseSize(component.content);
+        if (slotSize == null) slotSize = new int[]{2, 3};
+        int[] resolve = MamlImporter.pickResolveSize(
+                MamlImporter.scanSizes(mtz), slotSize[0], slotSize[1]);
+        if (resolve == null) {
+            throw new IllegalStateException("包里没有可用的小部件（缺少 widget_AxB）");
+        }
         String resPath = (String) compat.getMethod("getResPathAndUnZip",
                 String.class, int.class, int.class, String.class)
-                .invoke(null, name, 2, 3, mtz.getAbsolutePath());
+                .invoke(null, name, resolve[0], resolve[1], mtz.getAbsolutePath());
         if (resPath == null || resPath.isEmpty()) {
-            throw new IllegalStateException("包里没有 2x3 小部件");
+            throw new IllegalStateException("小部件包解析失败（" + resolve[0] + "x" + resolve[1] + "）");
         }
         return resPath;
     }
