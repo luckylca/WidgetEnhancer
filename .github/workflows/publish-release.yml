@@ -31,23 +31,24 @@ jobs:
       - name: Prepare APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.1.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.2.apk
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > /tmp/release-notes.md <<'EOF'
-          ## WidgetEnhancer 0.8.1
+          ## WidgetEnhancer 0.8.2
 
           为 Xiaomi MIX Flip 外屏提供自定义小部件能力的 LSPosed 模块。
 
           ### 主要更新
-          - 优化通知获取机制
-          - 优化通知显示
+          - 新增免授权小部件绑定
+          - 优化通知跳转
 
           ### LSPosed 作用域
           必选：`com.miui.fliphome`
+          免授权小部件绑定：`android`
 
           可选：
           - `com.netease.cloudmusic`
@@ -56,8 +57,8 @@ jobs:
           安装后请在 LSPosed 中启用模块并重启设备。
           EOF
 
-          gh release create "20-0.8.1" \
-            "dist/WidgetEnhancer-0.8.1.apk" \
+          gh release create "21-0.8.2" \
+            "dist/WidgetEnhancer-0.8.2.apk" \
             --target "$GITHUB_SHA" \
-            --title "WidgetEnhancer 0.8.1" \
+            --title "WidgetEnhancer 0.8.2" \
             --notes-file /tmp/release-notes.md

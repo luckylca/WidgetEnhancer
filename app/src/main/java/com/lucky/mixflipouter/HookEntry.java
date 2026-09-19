@@ -26,6 +26,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
+        if ("android".equals(param.packageName)) {
+            // system_server: silence AppWidget bind consent for FlipHome.
+            AppWidgetBindHook.install(param.classLoader);
+            return;
+        }
         if (Contract.SYSTEM_UI_PACKAGE.equals(param.packageName)) {
             if (param.processName == null || Contract.SYSTEM_UI_PACKAGE.equals(param.processName)) {
                 SystemUiTileHook.install(param.classLoader);

@@ -146,6 +146,14 @@ com.miui.fliphome
 
 这是模块的主要 Hook 目标。
 
+### AppWidget 免授权绑定
+
+```text
+android
+```
+
+用于在系统服务中仅为 `com.miui.fliphome` 放行 AppWidget 绑定权限，从而避免添加应用小部件时重复弹出系统授权确认。使用该功能时需要在 LSPosed 中勾选 `android` 作用域。
+
 ### 可选：网易云音乐
 
 ```text
@@ -166,7 +174,7 @@ com.android.systemui
 
 1. 从 [Releases](https://github.com/luckylca/WidgetEnhancer/releases/latest) 下载并安装 APK。
 2. 在 LSPosed 中启用 WidgetEnhancer。
-3. 至少勾选 `com.miui.fliphome` 作用域。
+3. 至少勾选 `com.miui.fliphome` 作用域；需要 AppWidget 免授权绑定时同时勾选 `android`。
 4. 根据需要勾选网易云音乐或 SystemUI。
 5. 重启手机。
 6. 打开 WidgetEnhancer 创建小部件。

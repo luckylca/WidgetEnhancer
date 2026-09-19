@@ -101,13 +101,6 @@ final class NotificationStateStore {
         }
     }
 
-    static void clear() {
-        synchronized (LOCK) {
-            entries.clear();
-            revision++;
-        }
-    }
-
     /**
      * Incremental post/remove callbacks are not reliable (missed while the
      * process was dead, rewritten keys on MIUI/HyperOS), so the list is
@@ -167,7 +160,7 @@ final class NotificationStateStore {
         }
         if (entry.contentIntent != null) {
             try {
-                entry.contentIntent.send();
+                sendContentIntent(context, entry.contentIntent);
                 result.putBoolean("ok", true);
                 return result;
             } catch (Throwable ignored) {
@@ -180,6 +173,31 @@ final class NotificationStateStore {
         result.putBoolean("ok", false);
         result.putString("message", "无法打开对应应用");
         return result;
+    }
+
+    /**
+     * Sends the notification's content intent like the status bar does: with a
+     * background-activity-start allowance. Without it, Android 12+ silently
+     * blocks the launch because our process is in the background when the
+     * cover screen is used (folded/locked) — which is why some apps' taps
+     * (e.g. Douyin) went nowhere.
+     */
+    private static void sendContentIntent(Context context, PendingIntent intent)
+            throws Exception {
+        Bundle options = backgroundStartOptions();
+        if (options != null && context != null) {
+            intent.send(context, 0, null, null, null, null, options);
+            return;
+        }
+        intent.send();
+    }
+
+    private static Bundle backgroundStartOptions() {
+        if (android.os.Build.VERSION.SDK_INT < 34) return null;
+        return android.app.ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(
+                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                .toBundle();
     }
 
     static Bundle dismiss(String key) {
@@ -271,7 +289,7 @@ final class NotificationStateStore {
             Intent intent = context.getPackageManager().getLaunchIntentForPackage(packageName);
             if (intent == null) return false;
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
+            context.startActivity(intent, backgroundStartOptions());
             return true;
         } catch (Throwable ignored) {
             return false;

@@ -4,5 +4,6 @@
         <item>com.miui.fliphome</item>
         <item>com.netease.cloudmusic</item>
         <item>com.android.systemui</item>
+        <item>android</item>
     </string-array>
 </resources>

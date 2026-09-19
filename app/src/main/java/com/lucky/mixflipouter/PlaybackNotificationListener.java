@@ -110,8 +110,10 @@ public final class PlaybackNotificationListener extends NotificationListenerServ
             catch (Throwable ignored) {}
         }
         PlaybackStateStore.clear();
+        // Keep the last known notifications on purpose: the widget keeps
+        // showing them during the disconnect window instead of flashing
+        // "暂无通知". attach() re-seeds from the live status bar on reconnect.
         NotificationStateStore.detach(this);
-        NotificationStateStore.clear();
         super.onListenerDisconnected();
     }
 
