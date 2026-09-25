@@ -85,6 +85,10 @@ public final class ConfigProvider extends ContentProvider {
             enforceMamlCacheCaller();
             return publishMamlCache(arg, extras);
         }
+        if ("deliver_system_widget_selection".equals(method)) {
+            enforceSystemWidgetPickerCaller();
+            return deliverSystemWidgetSelection(arg, extras);
+        }
         enforceAllowedCaller();
         if ("get_config".equals(method) || "get_widget".equals(method)) {
             return getWidget(arg == null ? Contract.DEFAULT_WIDGET_ID : arg);
@@ -160,6 +164,88 @@ public final class ConfigProvider extends ContentProvider {
             result.putString("message", error.getMessage() == null
                     ? "无法导入缓存小部件" : error.getMessage());
         }
+        return result;
+    }
+
+    private Bundle deliverSystemWidgetSelection(String requestId, Bundle extras) {
+        Bundle result = new Bundle();
+        SharedPreferences picker = getContext().getSharedPreferences(
+                Contract.SYSTEM_WIDGET_PICKER_PREFS, android.content.Context.MODE_PRIVATE);
+        String pending = picker.getString(Contract.PREF_PENDING_SYSTEM_WIDGET_REQUEST, null);
+        long createdAt = picker.getLong(Contract.PREF_PENDING_SYSTEM_WIDGET_AT, 0L);
+        String widgetId = picker.getString(Contract.PREF_PENDING_SYSTEM_WIDGET_ID, null);
+        if (requestId == null || !requestId.equals(pending)
+                || System.currentTimeMillis() - createdAt > 5 * 60_000L
+                || widgetId == null || extras == null) {
+            result.putBoolean("ok", false);
+            result.putString("message", "小部件选择请求已失效");
+            return result;
+        }
+
+        String kind = extras.getString("kind", "appwidget");
+        android.content.SharedPreferences.Editor selection = picker.edit()
+                .remove(Contract.PREF_PENDING_SYSTEM_WIDGET_REQUEST)
+                .remove(Contract.PREF_PENDING_SYSTEM_WIDGET_ID)
+                .remove(Contract.PREF_PENDING_SYSTEM_WIDGET_AT)
+                .putString(Contract.PREF_SYSTEM_WIDGET_RESULT_ID, widgetId)
+                .putString(Contract.PREF_SYSTEM_WIDGET_RESULT_KIND, kind);
+        if ("maml".equals(kind)) {
+            String cacheId = extras.getString("maml_id");
+            String name = extras.getString("maml_name");
+            android.os.ParcelFileDescriptor archive = extras.getParcelable("maml_archive");
+            if (cacheId == null || !cacheId.matches("[a-f0-9]{64}")
+                    || name == null || archive == null) {
+                result.putBoolean("ok", false);
+                result.putString("message", "小米小部件资源无效");
+                return result;
+            }
+            try {
+                if (MamlCacheStore.hasFingerprint(getContext(), cacheId, cacheId)) {
+                    archive.close();
+                } else {
+                    MamlCacheStore.publish(getContext(), cacheId, name, cacheId, archive);
+                }
+            } catch (Throwable error) {
+                try { archive.close(); } catch (Throwable ignored) {}
+                result.putBoolean("ok", false);
+                result.putString("message", error.getMessage() == null
+                        ? "无法导入小米小部件" : error.getMessage());
+                return result;
+            }
+            selection.remove(Contract.PREF_SYSTEM_WIDGET_RESULT_PROVIDER)
+                    .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_COLS)
+                    .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_ROWS)
+                    .putString(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_ID, cacheId)
+                    .putString(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_NAME, name);
+        } else {
+            String provider = extras.getString(Contract.EXTRA_SYSTEM_WIDGET_PROVIDER);
+            android.content.ComponentName component = provider == null
+                    ? null : android.content.ComponentName.unflattenFromString(provider);
+            if (component == null) {
+                result.putBoolean("ok", false);
+                result.putString("message", "应用小部件信息无效");
+                return result;
+            }
+            int cols = extras.getInt(Contract.EXTRA_SYSTEM_WIDGET_COLS, 2);
+            int rows = extras.getInt(Contract.EXTRA_SYSTEM_WIDGET_ROWS, 2);
+            if (!AppWidgetLayoutEngine.validSize(cols, rows)) {
+                cols = 2;
+                rows = 2;
+            }
+            selection.remove(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_ID)
+                    .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_NAME)
+                    .putString(Contract.PREF_SYSTEM_WIDGET_RESULT_PROVIDER,
+                            component.flattenToString())
+                    .putInt(Contract.PREF_SYSTEM_WIDGET_RESULT_COLS, cols)
+                    .putInt(Contract.PREF_SYSTEM_WIDGET_RESULT_ROWS, rows);
+        }
+        boolean stored = selection.commit();
+        if (!stored) {
+            result.putBoolean("ok", false);
+            result.putString("message", "无法保存小部件选择结果");
+            return result;
+        }
+        result.putBoolean("ok", true);
         return result;
     }
 
@@ -509,6 +595,20 @@ public final class ConfigProvider extends ContentProvider {
             }
         }
         throw new SecurityException("Caller cannot access the launcher MAML cache");
+    }
+
+    private void enforceSystemWidgetPickerCaller() {
+        int uid = Binder.getCallingUid();
+        if (uid == android.os.Process.myUid()) return;
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        if (packages != null) {
+            for (String name : packages) {
+                if (Contract.TARGET_PACKAGE.equals(name)
+                        || Contract.MAML_CACHE_PACKAGE.equals(name)
+                        || Contract.PERSONAL_ASSISTANT_PACKAGE.equals(name)) return;
+            }
+        }
+        throw new SecurityException("Caller cannot return a system widget selection");
     }
 
     private void enforceNeteaseCaller() {

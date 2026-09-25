@@ -49,6 +49,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookMamlCacheSource();
             return;
         }
+        if (Contract.PERSONAL_ASSISTANT_PACKAGE.equals(param.packageName)) {
+            SystemWidgetPickerHook.installAssistantPicker(param.classLoader);
+            return;
+        }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
         try {
             hookMamlCacheSource();

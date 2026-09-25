@@ -24,6 +24,7 @@ final class WidgetConfig {
     boolean loop = true;
     boolean mute = true;
     float lyricScale = 1f;
+    int notificationCount = 3;
     final String[] labels = new String[Contract.BUTTON_COUNT];
     final String[] actionTypes = new String[Contract.BUTTON_COUNT];
     final String[] actionValues = new String[Contract.BUTTON_COUNT];
@@ -80,6 +81,7 @@ final class WidgetConfig {
         out.putBoolean("loop", loop);
         out.putBoolean("mute", mute);
         out.putFloat("lyric_scale", lyricScale);
+        out.putInt("notification_count", notificationCount);
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             out.putString("button_" + i + "_label", labels[i]);
             out.putString("button_" + i + "_type", actionTypes[i]);
@@ -106,6 +108,7 @@ final class WidgetConfig {
         c.loop = b.getBoolean("loop", true);
         c.mute = b.getBoolean("mute", true);
         c.lyricScale = clampScale(b.getFloat("lyric_scale", 1f));
+        c.notificationCount = clampNotificationCount(b.getInt("notification_count", 3));
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             c.labels[i] = safe(b.getString("button_" + i + "_label"), "");
             c.actionTypes[i] = safe(b.getString("button_" + i + "_type"), "package");
@@ -136,6 +139,7 @@ final class WidgetConfig {
         runtime.put("loop", loop);
         runtime.put("mute", mute);
         runtime.put("lyricScale", lyricScale);
+        runtime.put("notificationCount", notificationCount);
         out.put("runtime", runtime);
         JSONObject canvas = new JSONObject();
         canvas.put("width", CANVAS_WIDTH);
@@ -168,6 +172,7 @@ final class WidgetConfig {
             c.loop = runtime.optBoolean("loop", true);
             c.mute = runtime.optBoolean("mute", true);
             c.lyricScale = clampScale((float) runtime.optDouble("lyricScale", 1.0));
+            c.notificationCount = clampNotificationCount(runtime.optInt("notificationCount", 3));
         }
         JSONArray actions = in.optJSONArray("actions");
         if (actions != null) {
@@ -361,6 +366,10 @@ final class WidgetConfig {
     private static float clampScale(float value) {
         if (!Float.isFinite(value)) return 1f;
         return Math.max(0.5f, Math.min(2f, value));
+    }
+
+    static int clampNotificationCount(int value) {
+        return Math.max(1, Math.min(3, value));
     }
 
     private static String safe(String value, String fallback) {

@@ -22,7 +22,7 @@ import java.util.Locale;
 final class PreviewRenderer {
     private static final int WIDTH = 440;
     private static final int HEIGHT = 720;
-    private static final int RENDER_VERSION = 11;
+    private static final int RENDER_VERSION = 12;
 
     static File ensure(Context context, WidgetConfig config, File media, long revision) {
         String id = config == null ? "missing" : safeFilePart(config.id);
@@ -150,7 +150,8 @@ final class PreviewRenderer {
             return;
         }
         if (WidgetTypeRegistry.NOTIFICATIONS.equals(typeId)) {
-            drawNotificationPreview(canvas);
+            drawNotificationPreview(canvas,
+                    WidgetConfig.clampNotificationCount(config.notificationCount));
             return;
         }
         if (WidgetTypeRegistry.APPWIDGET.equals(typeId)) {
@@ -228,7 +229,7 @@ final class PreviewRenderer {
         }
     }
 
-    private static void drawNotificationPreview(Canvas canvas) {
+    private static void drawNotificationPreview(Canvas canvas, int rowCount) {
         Paint icon = new Paint(Paint.ANTI_ALIAS_FLAG);
         icon.setColor(0x66ffffff);
         Paint title = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -243,8 +244,8 @@ final class PreviewRenderer {
                 {"短信", "验证码 483920"},
                 {"系统更新", "新版本可用"}
         };
-        float rowHeight = HEIGHT / 3f;
-        for (int i = 0; i < 3; i++) {
+        float rowHeight = HEIGHT / (float) rowCount;
+        for (int i = 0; i < rowCount; i++) {
             float centerY = i * rowHeight + rowHeight / 2f;
             float iconSize = rowHeight * 0.46f;
             float iconLeft = rowHeight * 0.14f;

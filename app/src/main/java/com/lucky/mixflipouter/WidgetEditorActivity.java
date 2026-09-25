@@ -2,6 +2,7 @@ package com.lucky.mixflipouter;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.ComponentName;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -34,6 +35,8 @@ import java.util.Map;
 public final class WidgetEditorActivity extends Activity {
     static final String EXTRA_DEBUG_SCROLL_Y = "debug_scroll_y";
     static final String EXTRA_DEBUG_TYPE_ID = "debug_type_id";
+    static final String EXTRA_DEBUG_NOTIFICATION_COUNT = "debug_notification_count";
+    static final String EXTRA_SYSTEM_WIDGET_SELECTION = "system_widget_selection";
     private static final int PICK_IMAGE = 1001;
     private static final int PICK_VIDEO = 1002;
     private static final int PICK_APP = 1003;
@@ -80,6 +83,11 @@ public final class WidgetEditorActivity extends Activity {
         if (WidgetTypeRegistry.get(debugType) != null) {
             config = WidgetTypeRegistry.create(debugType);
             config.id = "debug-preview";
+            if (WidgetTypeRegistry.NOTIFICATIONS.equals(debugType)
+                    && getIntent().hasExtra(EXTRA_DEBUG_NOTIFICATION_COUNT)) {
+                config.notificationCount = WidgetConfig.clampNotificationCount(
+                        getIntent().getIntExtra(EXTRA_DEBUG_NOTIFICATION_COUNT, 3));
+            }
             if (WidgetTypeRegistry.SHORTCUTS.equals(debugType)) {
                 config.components.add(WidgetComponent.button(
                         "按钮 2", ActionSpec.FLASHLIGHT_TOGGLE, "", 0, 0, 1, 1, 1));
@@ -98,9 +106,26 @@ public final class WidgetEditorActivity extends Activity {
         setContentView(createContent());
         SystemBars.apply(this);
         loadValues();
+        handleSystemWidgetSelection(getIntent());
+        if (getIntent().getBooleanExtra("debug_open_system_widget_picker", false)) {
+            scroll.post(this::openSystemWidgetPicker);
+        }
         if (getIntent().getBooleanExtra("debug_show_maml_cache_picker", false)) {
             scroll.post(this::showMamlCachePicker);
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleSystemWidgetSelection(intent);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        consumeSystemWidgetPickerResult();
     }
 
     private View createContent() {
@@ -230,7 +255,7 @@ public final class WidgetEditorActivity extends Activity {
         previewHolder.postDelayed(livePreviewRefresh, 200L);
     }
 
-    private final Runnable livePreviewRefresh = this::renderShortcutPreview;
+    private final Runnable livePreviewRefresh = this::renderLivePreview;
 
     private void createShortcutEditor(LinearLayout root) {
         section(root, "外屏预览");
@@ -247,6 +272,35 @@ public final class WidgetEditorActivity extends Activity {
     }
 
     private void createNotificationEditor(LinearLayout root) {
+        section(root, "显示通知数量");
+        TextView hint = text("选择最近显示的通知条数", 14,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        root.addView(hint, matchWrap());
+
+        MaterialButtonToggleGroup countSelector = new MaterialButtonToggleGroup(this);
+        countSelector.setSingleSelection(true);
+        countSelector.setSelectionRequired(true);
+        int selectedId = View.NO_ID;
+        for (int count = 1; count <= 3; count++) {
+            MaterialButton option = outlinedButton(count + " 条", v -> {});
+            option.setCheckable(true);
+            option.setId(View.generateViewId());
+            option.setTag(count);
+            countSelector.addView(option, weighted());
+            if (count == config.notificationCount) selectedId = option.getId();
+        }
+        if (selectedId != View.NO_ID) countSelector.check(selectedId);
+        countSelector.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (!isChecked) return;
+            View selected = group.findViewById(checkedId);
+            if (selected == null || !(selected.getTag() instanceof Integer)) return;
+            int nextCount = (Integer) selected.getTag();
+            if (config.notificationCount == nextCount) return;
+            config.notificationCount = nextCount;
+            renderLivePreview();
+        });
+        root.addView(countSelector, matchWrap());
+
         section(root, "外屏预览");
         addLivePreview(root);
     }
@@ -292,6 +346,11 @@ public final class WidgetEditorActivity extends Activity {
         LinearLayout.LayoutParams addParams = matchWrap();
         addParams.topMargin = dp(14);
         root.addView(add, addParams);
+        MaterialButton nativePicker = outlinedButton(
+                "从系统桌面小部件面板选择", v -> openSystemWidgetPicker());
+        LinearLayout.LayoutParams nativePickerParams = matchWrap();
+        nativePickerParams.topMargin = dp(8);
+        root.addView(nativePicker, nativePickerParams);
         MaterialButton importZip = outlinedButton("导入 ZIP 到格子", v -> beginImportSlotZip());
         LinearLayout.LayoutParams zipParams = matchWrap();
         zipParams.topMargin = dp(8);
@@ -342,6 +401,95 @@ public final class WidgetEditorActivity extends Activity {
 
     private void addAppWidgetSlot() {
         startActivityForResult(new Intent(this, AppWidgetPickerActivity.class), PICK_APPWIDGET);
+    }
+
+    private void openSystemWidgetPicker() {
+        if (config == null || !WidgetTypeRegistry.APPWIDGET.equals(type.id)) return;
+        config.enabled = enabledSwitch.isChecked();
+        config.name = nameInput.getText().toString().trim();
+        WidgetTypeRegistry.normalize(config);
+        repository.save(config);
+
+        String requestId = java.util.UUID.randomUUID().toString();
+        getSharedPreferences(Contract.SYSTEM_WIDGET_PICKER_PREFS, MODE_PRIVATE).edit()
+                .putString(Contract.PREF_PENDING_SYSTEM_WIDGET_REQUEST, requestId)
+                .putString(Contract.PREF_PENDING_SYSTEM_WIDGET_ID, config.id)
+                .putLong(Contract.PREF_PENDING_SYSTEM_WIDGET_AT, System.currentTimeMillis())
+                .apply();
+
+        Intent picker = new Intent(Intent.ACTION_VIEW)
+                .setComponent(new ComponentName(Contract.PERSONAL_ASSISTANT_PACKAGE,
+                        "com.miui.personalassistant.picker.business.home.pages.PickerHomeActivity"))
+                .putExtra("openSource", 2)
+                .putExtra("picker_tip_source", 10)
+                .putExtra(Contract.EXTRA_SYSTEM_WIDGET_PICK_REQUEST, requestId);
+        try {
+            startActivity(picker);
+        } catch (Throwable error) {
+            getSharedPreferences(Contract.SYSTEM_WIDGET_PICKER_PREFS, MODE_PRIVATE).edit()
+                    .remove(Contract.PREF_PENDING_SYSTEM_WIDGET_REQUEST)
+                    .remove(Contract.PREF_PENDING_SYSTEM_WIDGET_ID)
+                    .remove(Contract.PREF_PENDING_SYSTEM_WIDGET_AT)
+                    .apply();
+            Toast.makeText(this, "无法打开系统桌面小部件面板", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void handleSystemWidgetSelection(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(EXTRA_SYSTEM_WIDGET_SELECTION, false)
+                || !intent.hasExtra(Contract.EXTRA_SYSTEM_WIDGET_PROVIDER)) return;
+        String provider = intent.getStringExtra(Contract.EXTRA_SYSTEM_WIDGET_PROVIDER);
+        int cols = intent.getIntExtra(Contract.EXTRA_SYSTEM_WIDGET_COLS, 2);
+        int rows = intent.getIntExtra(Contract.EXTRA_SYSTEM_WIDGET_ROWS, 2);
+        intent.removeExtra(Contract.EXTRA_SYSTEM_WIDGET_PROVIDER);
+        intent.removeExtra(Contract.EXTRA_SYSTEM_WIDGET_COLS);
+        intent.removeExtra(Contract.EXTRA_SYSTEM_WIDGET_ROWS);
+        intent.removeExtra(EXTRA_SYSTEM_WIDGET_SELECTION);
+        applySystemWidgetSelection(provider, cols, rows);
+    }
+
+    private void consumeSystemWidgetPickerResult() {
+        android.content.SharedPreferences picker = getSharedPreferences(
+                Contract.SYSTEM_WIDGET_PICKER_PREFS, MODE_PRIVATE);
+        String widgetId = picker.getString(Contract.PREF_SYSTEM_WIDGET_RESULT_ID, null);
+        String kind = picker.getString(Contract.PREF_SYSTEM_WIDGET_RESULT_KIND, null);
+        String provider = picker.getString(Contract.PREF_SYSTEM_WIDGET_RESULT_PROVIDER, null);
+        if (widgetId == null || kind == null) return;
+        String mamlId = picker.getString(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_ID, null);
+        String mamlName = picker.getString(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_NAME, null);
+        int cols = picker.getInt(Contract.PREF_SYSTEM_WIDGET_RESULT_COLS, 2);
+        int rows = picker.getInt(Contract.PREF_SYSTEM_WIDGET_RESULT_ROWS, 2);
+        clearSystemWidgetPickerResult(picker);
+        if (!widgetId.equals(config.id)) return;
+        if ("maml".equals(kind)) {
+            if (mamlId != null && mamlName != null) {
+                importCachedMaml(new MamlCacheStore.Item(mamlId, mamlName));
+            }
+            return;
+        }
+        applySystemWidgetSelection(provider, cols, rows);
+    }
+
+    private void clearSystemWidgetPickerResult(android.content.SharedPreferences picker) {
+        picker.edit().remove(Contract.PREF_SYSTEM_WIDGET_RESULT_ID)
+                .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_KIND)
+                .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_PROVIDER)
+                .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_COLS)
+                .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_ROWS)
+                .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_ID)
+                .remove(Contract.PREF_SYSTEM_WIDGET_RESULT_MAML_NAME).apply();
+    }
+
+    private void applySystemWidgetSelection(String provider, int cols, int rows) {
+        if (provider == null || provider.isEmpty()
+                || !WidgetTypeRegistry.APPWIDGET.equals(type.id)) return;
+        if (!AppWidgetLayoutEngine.validSize(cols, rows)) {
+            cols = 2;
+            rows = 2;
+        }
+        config.components.add(WidgetComponent.appWidget(provider, cols, rows));
+        refreshAppWidgetGrid();
+        Toast.makeText(this, "已添加系统小部件到外屏格子，保存后生效", Toast.LENGTH_LONG).show();
     }
 
     private void beginImportSlotZip() {
@@ -532,7 +680,7 @@ public final class WidgetEditorActivity extends Activity {
         if (mediaPreview != null) loadMediaPreview();
         updateMediaStatus();
         renderShortcuts();
-        renderShortcutPreview();
+        renderLivePreview();
         refreshAppWidgetGrid();
     }
 
@@ -564,7 +712,7 @@ public final class WidgetEditorActivity extends Activity {
     private void renderShortcuts() {
         if (shortcutList == null) return;
         WidgetTypeRegistry.buildShortcutLayout(config);
-        renderShortcutPreview();
+        renderLivePreview();
         shortcutList.removeAllViews();
         shortcutLabels.clear();
         ArrayList<WidgetComponent> buttons = shortcutComponents();
@@ -599,7 +747,7 @@ public final class WidgetEditorActivity extends Activity {
         }
     }
 
-    private void renderShortcutPreview() {
+    private void renderLivePreview() {
         if (previewHolder == null) return;
         previewHolder.removeAllViews();
         MediaWidgetView preview = new MediaWidgetView(this, config, false);

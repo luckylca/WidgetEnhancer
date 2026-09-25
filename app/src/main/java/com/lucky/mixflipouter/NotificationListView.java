@@ -21,9 +21,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Notification layer rendered inside the FlipHome process: newest three
- * notifications, one per fixed-height row (widget height / 3) stacked from
- * the top — rows never stretch to fill the widget when fewer are bound.
+ * Notification layer rendered inside the FlipHome process. It shows up to
+ * the configured number of recent notifications and shares the full height
+ * evenly between the notifications that are currently available.
  * Tap opens the source app, swiping a row left dismisses the notification
  * through the module's notification listener. Fully transparent background.
  */
@@ -42,6 +42,7 @@ final class NotificationListView extends FrameLayout {
     private final Map<String, Drawable> iconCache = new HashMap<>();
     private final int touchSlop;
     private final boolean interactive;
+    private final int maxRows;
     private Callback callback;
     private long appliedRevision = -1;
     private Bundle pendingData;
@@ -50,9 +51,10 @@ final class NotificationListView extends FrameLayout {
     private float downY;
     private boolean swiping;
 
-    NotificationListView(Context context, boolean interactive) {
+    NotificationListView(Context context, boolean interactive, int maxRows) {
         super(context);
         this.interactive = interactive;
+        this.maxRows = WidgetConfig.clampNotificationCount(maxRows);
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         rowContainer = new LinearLayout(context);
         rowContainer.setOrientation(LinearLayout.VERTICAL);
@@ -60,8 +62,7 @@ final class NotificationListView extends FrameLayout {
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         for (int i = 0; i < ROWS; i++) {
             rows[i] = new RowView(context);
-            // Fixed row height (set in onMeasure to container/ROWS); rows
-            // stack from the top instead of stretching to fill the widget.
+            rows[i].setVisibility(GONE);
             rowContainer.addView(rows[i], new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -128,7 +129,7 @@ final class NotificationListView extends FrameLayout {
     private void applyData(Bundle data) {
         long revision = data.getLong("revision", -1);
         if (revision == appliedRevision) return;
-        int count = Math.min(ROWS, data.getInt("count", 0));
+        int count = Math.min(maxRows, Math.min(ROWS, data.getInt("count", 0)));
         boolean applied = true;
         for (int i = 0; i < ROWS; i++) {
             RowView row = rows[i];
@@ -158,7 +159,11 @@ final class NotificationListView extends FrameLayout {
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int height = MeasureSpec.getSize(heightMeasureSpec);
         if (height > 0) {
-            int rowHeight = Math.max(1, height / ROWS);
+            int visibleRows = 0;
+            for (RowView row : rows) {
+                if (row.getVisibility() == VISIBLE) visibleRows++;
+            }
+            int rowHeight = Math.max(1, height / Math.max(1, visibleRows));
             int iconSize = Math.max(1, Math.round(rowHeight * 0.36f));
             float titleSize = Math.max(8f, rowHeight * 0.185f);
             float contentSize = Math.max(8f, rowHeight * 0.15f);

@@ -45,6 +45,7 @@
 
         <activity
             android:name=".WidgetEditorActivity"
+            android:launchMode="singleTop"
             android:exported="false" />
 
         <activity
