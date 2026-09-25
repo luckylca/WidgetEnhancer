@@ -14,6 +14,7 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -55,6 +56,8 @@ public final class DeviceTestActivity extends Activity {
             "com.lucky.mixflipouter.debug.CREATE_TYPE_WIDGET";
     public static final String ACTION_TEST_NOTIFICATION_SWIPE =
             "com.lucky.mixflipouter.debug.TEST_NOTIFICATION_SWIPE";
+    public static final String ACTION_TEST_NOTIFICATION_FILTER =
+            "com.lucky.mixflipouter.debug.TEST_NOTIFICATION_FILTER";
     public static final String ACTION_TEST_APPWIDGET_BIND =
             "com.lucky.mixflipouter.debug.TEST_APPWIDGET_BIND";
     public static final String ACTION_CHECK_APPWIDGET_BOUND =
@@ -74,6 +77,10 @@ public final class DeviceTestActivity extends Activity {
         super.onCreate(state);
         setShowWhenLocked(true);
         setTurnScreenOn(true);
+        if (ACTION_TEST_NOTIFICATION_FILTER.equals(getIntent().getAction())) {
+            runNotificationFilterTest();
+            return;
+        }
         if (ACTION_OPEN_RUNTIME_WIDGET.equals(getIntent().getAction())) {
             String widgetId = getIntent().getStringExtra(Contract.EXTRA_WIDGET_ID);
             WidgetConfig config = new WidgetRepository(this).get(
@@ -344,6 +351,77 @@ public final class DeviceTestActivity extends Activity {
             }
         }
         return null;
+    }
+
+    private void runNotificationFilterTest() {
+        JSONObject result = new JSONObject();
+        try {
+            JSONArray off = testNotificationFilterCase(
+                    WidgetConfig.NOTIFICATION_FILTER_OFF, new String[0]);
+            JSONArray whitelist = testNotificationFilterCase(
+                    WidgetConfig.NOTIFICATION_FILTER_WHITELIST,
+                    new String[]{"com.example.allowed"});
+            JSONArray blacklist = testNotificationFilterCase(
+                    WidgetConfig.NOTIFICATION_FILTER_BLACKLIST,
+                    new String[]{"com.example.blocked"});
+            JSONArray expectedOff = new JSONArray()
+                    .put("blocked-0").put("allowed-1").put("blocked-2");
+            JSONArray expectedWhitelist = new JSONArray()
+                    .put("allowed-1").put("allowed-4").put("allowed-6");
+            JSONArray expectedBlacklist = new JSONArray()
+                    .put("allowed-1").put("other-3").put("allowed-4");
+            result.put("off", off);
+            result.put("whitelist", whitelist);
+            result.put("blacklist", blacklist);
+            result.put("expected_off", expectedOff);
+            result.put("expected_whitelist", expectedWhitelist);
+            result.put("expected_blacklist", expectedBlacklist);
+            result.put("ok", expectedOff.toString().equals(off.toString())
+                    && expectedWhitelist.toString().equals(whitelist.toString())
+                    && expectedBlacklist.toString().equals(blacklist.toString()));
+        } catch (Throwable error) {
+            try {
+                result.put("ok", false);
+                result.put("error", error.getClass().getSimpleName() + ": "
+                        + error.getMessage());
+            } catch (Throwable ignored) {
+            }
+        }
+        writeResult(result);
+        finish();
+    }
+
+    private JSONArray testNotificationFilterCase(int mode, String[] selectedPackages)
+            throws Exception {
+        WidgetConfig config = new WidgetConfig();
+        config.notificationCount = 3;
+        config.notificationFilterMode = mode;
+        java.util.Collections.addAll(config.notificationFilterPackages, selectedPackages);
+        // Exercise the persisted configuration path before constructing the real list view.
+        config = WidgetConfig.fromJson(config.toJson());
+        NotificationListView list = new NotificationListView(this, false,
+                config.notificationCount, config.notificationFilterMode,
+                config.notificationFilterPackages);
+
+        String[] packages = {
+                "com.example.blocked", "com.example.allowed", "com.example.blocked",
+                "com.example.other", "com.example.allowed", "com.example.blocked",
+                "com.example.allowed"
+        };
+        Bundle data = new Bundle();
+        data.putLong("revision", 100L + mode);
+        data.putInt("count", packages.length);
+        for (int i = 0; i < packages.length; i++) {
+            data.putString("key_" + i, ("com.example.blocked".equals(packages[i])
+                    ? "blocked-" : "com.example.allowed".equals(packages[i])
+                    ? "allowed-" : "other-") + i);
+            data.putString("pkg_" + i, packages[i]);
+            data.putString("title_" + i, "测试通知 " + i);
+            data.putString("text_" + i, "内容");
+            data.putBoolean("clearable_" + i, true);
+        }
+        list.setData(data);
+        return new JSONArray(list.debugBoundKeys());
     }
 
     private void dispatchTap(MediaWidgetView widget, long downTime, float y) {

@@ -9,6 +9,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 final class WidgetConfig {
@@ -25,10 +26,16 @@ final class WidgetConfig {
     boolean mute = true;
     float lyricScale = 1f;
     int notificationCount = 3;
+    int notificationFilterMode = NOTIFICATION_FILTER_OFF;
+    final List<String> notificationFilterPackages = new ArrayList<>();
     final String[] labels = new String[Contract.BUTTON_COUNT];
     final String[] actionTypes = new String[Contract.BUTTON_COUNT];
     final String[] actionValues = new String[Contract.BUTTON_COUNT];
     final List<WidgetComponent> components = new ArrayList<>();
+
+    static final int NOTIFICATION_FILTER_OFF = 0;
+    static final int NOTIFICATION_FILTER_WHITELIST = 1;
+    static final int NOTIFICATION_FILTER_BLACKLIST = 2;
 
     WidgetConfig() {
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
@@ -82,6 +89,10 @@ final class WidgetConfig {
         out.putBoolean("mute", mute);
         out.putFloat("lyric_scale", lyricScale);
         out.putInt("notification_count", notificationCount);
+        out.putInt("notification_filter_mode",
+                clampNotificationFilterMode(notificationFilterMode));
+        out.putStringArrayList("notification_filter_packages",
+                new ArrayList<>(cleanNotificationPackages(notificationFilterPackages)));
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             out.putString("button_" + i + "_label", labels[i]);
             out.putString("button_" + i + "_type", actionTypes[i]);
@@ -109,6 +120,10 @@ final class WidgetConfig {
         c.mute = b.getBoolean("mute", true);
         c.lyricScale = clampScale(b.getFloat("lyric_scale", 1f));
         c.notificationCount = clampNotificationCount(b.getInt("notification_count", 3));
+        c.notificationFilterMode = clampNotificationFilterMode(
+                b.getInt("notification_filter_mode", NOTIFICATION_FILTER_OFF));
+        c.notificationFilterPackages.addAll(cleanNotificationPackages(
+                b.getStringArrayList("notification_filter_packages")));
         for (int i = 0; i < Contract.BUTTON_COUNT; i++) {
             c.labels[i] = safe(b.getString("button_" + i + "_label"), "");
             c.actionTypes[i] = safe(b.getString("button_" + i + "_type"), "package");
@@ -140,6 +155,13 @@ final class WidgetConfig {
         runtime.put("mute", mute);
         runtime.put("lyricScale", lyricScale);
         runtime.put("notificationCount", notificationCount);
+        runtime.put("notificationFilterMode",
+                clampNotificationFilterMode(notificationFilterMode));
+        JSONArray notificationPackages = new JSONArray();
+        for (String packageName : cleanNotificationPackages(notificationFilterPackages)) {
+            notificationPackages.put(packageName);
+        }
+        runtime.put("notificationFilterPackages", notificationPackages);
         out.put("runtime", runtime);
         JSONObject canvas = new JSONObject();
         canvas.put("width", CANVAS_WIDTH);
@@ -173,6 +195,18 @@ final class WidgetConfig {
             c.mute = runtime.optBoolean("mute", true);
             c.lyricScale = clampScale((float) runtime.optDouble("lyricScale", 1.0));
             c.notificationCount = clampNotificationCount(runtime.optInt("notificationCount", 3));
+            c.notificationFilterMode = clampNotificationFilterMode(
+                    runtime.optInt("notificationFilterMode", NOTIFICATION_FILTER_OFF));
+            JSONArray notificationPackages =
+                    runtime.optJSONArray("notificationFilterPackages");
+            if (notificationPackages != null) {
+                ArrayList<String> values = new ArrayList<>();
+                for (int i = 0; i < notificationPackages.length(); i++) {
+                    String packageName = notificationPackages.optString(i, "");
+                    if (!packageName.isEmpty()) values.add(packageName);
+                }
+                c.notificationFilterPackages.addAll(cleanNotificationPackages(values));
+            }
         }
         JSONArray actions = in.optJSONArray("actions");
         if (actions != null) {
@@ -370,6 +404,23 @@ final class WidgetConfig {
 
     static int clampNotificationCount(int value) {
         return Math.max(1, Math.min(3, value));
+    }
+
+    static int clampNotificationFilterMode(int mode) {
+        return mode < NOTIFICATION_FILTER_OFF || mode > NOTIFICATION_FILTER_BLACKLIST
+                ? NOTIFICATION_FILTER_OFF : mode;
+    }
+
+    static ArrayList<String> cleanNotificationPackages(List<String> packages) {
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        if (packages != null) {
+            for (String packageName : packages) {
+                if (packageName == null) continue;
+                String clean = packageName.trim();
+                if (!clean.isEmpty() && clean.length() <= 255) unique.add(clean);
+            }
+        }
+        return new ArrayList<>(unique);
     }
 
     private static String safe(String value, String fallback) {

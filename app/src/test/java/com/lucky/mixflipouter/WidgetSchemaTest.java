@@ -138,6 +138,26 @@ public final class WidgetSchemaTest {
     }
 
     @Test
+    public void notificationAppFilterDefaultsOffAndRoundTrips() throws Exception {
+        WidgetConfig defaults = new WidgetConfig();
+        assertEquals(WidgetConfig.NOTIFICATION_FILTER_OFF, defaults.notificationFilterMode);
+        assertTrue(defaults.notificationFilterPackages.isEmpty());
+
+        WidgetConfig source = new WidgetConfig();
+        source.notificationFilterMode = WidgetConfig.NOTIFICATION_FILTER_WHITELIST;
+        source.notificationFilterPackages.add("com.example.mail");
+        source.notificationFilterPackages.add("com.example.chat");
+
+        WidgetConfig restored = WidgetConfig.fromJson(source.toJson());
+
+        assertEquals(WidgetConfig.NOTIFICATION_FILTER_WHITELIST,
+                restored.notificationFilterMode);
+        assertEquals(2, restored.notificationFilterPackages.size());
+        assertEquals("com.example.mail", restored.notificationFilterPackages.get(0));
+        assertEquals("com.example.chat", restored.notificationFilterPackages.get(1));
+    }
+
+    @Test
     public void legacyEditorMergePreservesCanvasOnlyComponentsAndButtonGeometry() {
         WidgetConfig config = new WidgetConfig();
         config.mediaType = "image";

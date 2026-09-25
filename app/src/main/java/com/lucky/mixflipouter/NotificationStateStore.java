@@ -14,8 +14,8 @@ import java.util.List;
 
 /**
  * In-process feed of recent status bar notifications shared by the notification
- * listener and the guarded provider. Holds at most {@link #MAX_ENTRIES} entries,
- * exposes the newest {@link #VISIBLE_ENTRIES} to the outer-screen widget.
+ * listener and the guarded provider. Holds at most {@link #MAX_ENTRIES} entries
+ * and exposes enough recent entries for per-widget app filtering.
  */
 final class NotificationStateStore {
     static final int MAX_ENTRIES = 20;
@@ -128,10 +128,18 @@ final class NotificationStateStore {
     }
 
     static Bundle snapshot() {
+        return snapshot(VISIBLE_ENTRIES);
+    }
+
+    static Bundle snapshotAll() {
+        return snapshot(MAX_ENTRIES);
+    }
+
+    private static Bundle snapshot(int limit) {
         resyncThrottled();
         Bundle out = new Bundle();
         synchronized (LOCK) {
-            int count = Math.min(VISIBLE_ENTRIES, entries.size());
+            int count = Math.min(limit, entries.size());
             out.putLong("revision", revision);
             out.putInt("count", count);
             for (int i = 0; i < count; i++) {

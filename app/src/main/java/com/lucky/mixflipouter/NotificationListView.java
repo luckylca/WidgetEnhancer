@@ -18,7 +18,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Notification layer rendered inside the FlipHome process. It shows up to
@@ -43,6 +46,8 @@ final class NotificationListView extends FrameLayout {
     private final int touchSlop;
     private final boolean interactive;
     private final int maxRows;
+    private final int filterMode;
+    private final Set<String> filterPackages;
     private Callback callback;
     private long appliedRevision = -1;
     private Bundle pendingData;
@@ -51,10 +56,14 @@ final class NotificationListView extends FrameLayout {
     private float downY;
     private boolean swiping;
 
-    NotificationListView(Context context, boolean interactive, int maxRows) {
+    NotificationListView(Context context, boolean interactive, int maxRows,
+                         int filterMode, List<String> filterPackages) {
         super(context);
         this.interactive = interactive;
         this.maxRows = WidgetConfig.clampNotificationCount(maxRows);
+        this.filterMode = WidgetConfig.clampNotificationFilterMode(filterMode);
+        this.filterPackages = filterPackages == null
+                ? new HashSet<>() : new HashSet<>(filterPackages);
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         rowContainer = new LinearLayout(context);
         rowContainer.setOrientation(LinearLayout.VERTICAL);
@@ -118,6 +127,14 @@ final class NotificationListView extends FrameLayout {
         return bound;
     }
 
+    java.util.ArrayList<String> debugBoundKeys() {
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        for (RowView row : rows) {
+            if (row.getVisibility() == VISIBLE && row.key != null) keys.add(row.key);
+        }
+        return keys;
+    }
+
     boolean debugSwiping() {
         return swiping;
     }
@@ -129,30 +146,43 @@ final class NotificationListView extends FrameLayout {
     private void applyData(Bundle data) {
         long revision = data.getLong("revision", -1);
         if (revision == appliedRevision) return;
-        int count = Math.min(maxRows, Math.min(ROWS, data.getInt("count", 0)));
+        int count = Math.max(0, Math.min(NotificationStateStore.MAX_ENTRIES,
+                data.getInt("count", 0)));
         boolean applied = true;
-        for (int i = 0; i < ROWS; i++) {
-            RowView row = rows[i];
+        int visibleCount = 0;
+        for (RowView row : rows) {
             row.resetSwipe();
+            row.setVisibility(GONE);
+        }
+        for (int i = 0; i < count && visibleCount < maxRows; i++) {
+            String packageName = data.getString("pkg_" + i, "");
+            if (!acceptsPackage(packageName)) continue;
+            RowView row = rows[visibleCount];
             try {
-                if (i < count) {
-                    row.bind(
-                            data.getString("key_" + i, ""),
-                            data.getString("pkg_" + i, ""),
-                            data.getString("title_" + i, ""),
-                            data.getString("text_" + i, ""),
-                            data.getBoolean("clearable_" + i, false));
-                    row.setVisibility(VISIBLE);
-                } else {
-                    row.setVisibility(GONE);
-                }
+                row.bind(
+                        data.getString("key_" + i, ""),
+                        packageName,
+                        data.getString("title_" + i, ""),
+                        data.getString("text_" + i, ""),
+                        data.getBoolean("clearable_" + i, false));
+                row.setVisibility(VISIBLE);
+                visibleCount++;
             } catch (Throwable error) {
                 applied = false;
-                row.setVisibility(GONE);
             }
         }
         if (applied) appliedRevision = revision;
-        emptyView.setVisibility(count == 0 ? VISIBLE : GONE);
+        emptyView.setVisibility(visibleCount == 0 ? VISIBLE : GONE);
+    }
+
+    private boolean acceptsPackage(String packageName) {
+        if (filterMode == WidgetConfig.NOTIFICATION_FILTER_WHITELIST) {
+            return filterPackages.contains(packageName);
+        }
+        if (filterMode == WidgetConfig.NOTIFICATION_FILTER_BLACKLIST) {
+            return !filterPackages.contains(packageName);
+        }
+        return true;
     }
 
     @Override

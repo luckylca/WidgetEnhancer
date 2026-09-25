@@ -3,6 +3,8 @@ package com.lucky.mixflipouter;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.ComponentName;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -10,12 +12,17 @@ import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.BaseAdapter;
+import android.widget.CheckedTextView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -29,7 +36,10 @@ import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /** Type-aware editor that exposes only the options each Widget actually needs. */
 public final class WidgetEditorActivity extends Activity {
@@ -72,6 +82,8 @@ public final class WidgetEditorActivity extends Activity {
     private FrameLayout previewHolder;
     private com.google.android.material.slider.Slider lyricSizeSlider;
     private TextView lyricSizeValue;
+    private TextView notificationFilterSummary;
+    private MaterialButton notificationFilterAppsButton;
     private ScrollView scroll;
     private String pendingShortcutId;
 
@@ -301,8 +313,207 @@ public final class WidgetEditorActivity extends Activity {
         });
         root.addView(countSelector, matchWrap());
 
+        section(root, "通知应用筛选");
+        TextView filterHint = text("可按应用设置白名单或黑名单，默认关闭筛选。",
+                14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        root.addView(filterHint, matchWrap());
+
+        MaterialButtonToggleGroup filterModeSelector = new MaterialButtonToggleGroup(this);
+        filterModeSelector.setSingleSelection(true);
+        filterModeSelector.setSelectionRequired(true);
+        String[] filterModeLabels = {"关闭", "白名单", "黑名单"};
+        int selectedFilterModeId = View.NO_ID;
+        for (int mode = WidgetConfig.NOTIFICATION_FILTER_OFF;
+             mode <= WidgetConfig.NOTIFICATION_FILTER_BLACKLIST; mode++) {
+            final int filterMode = mode;
+            MaterialButton option = outlinedButton(filterModeLabels[mode], v -> {});
+            option.setCheckable(true);
+            option.setId(View.generateViewId());
+            option.setTag(mode);
+            filterModeSelector.addView(option, weighted());
+            if (config.notificationFilterMode == mode) selectedFilterModeId = option.getId();
+        }
+        if (selectedFilterModeId != View.NO_ID) filterModeSelector.check(selectedFilterModeId);
+        filterModeSelector.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (!isChecked) return;
+            View selected = group.findViewById(checkedId);
+            if (selected == null || !(selected.getTag() instanceof Integer)) return;
+            config.notificationFilterMode = WidgetConfig.clampNotificationFilterMode(
+                    (Integer) selected.getTag());
+            updateNotificationFilterSummary();
+            renderLivePreview();
+        });
+        root.addView(filterModeSelector, matchWrap());
+
+        notificationFilterAppsButton = outlinedButton("选择应用", v -> chooseNotificationFilterApps());
+        LinearLayout.LayoutParams filterAppsParams = matchWrap();
+        filterAppsParams.topMargin = dp(8);
+        root.addView(notificationFilterAppsButton, filterAppsParams);
+        notificationFilterSummary = text("", 13,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        notificationFilterSummary.setPadding(0, dp(5), 0, dp(4));
+        root.addView(notificationFilterSummary, matchWrap());
+        updateNotificationFilterSummary();
+
         section(root, "外屏预览");
         addLivePreview(root);
+    }
+
+    private void updateNotificationFilterSummary() {
+        if (notificationFilterSummary == null || notificationFilterAppsButton == null) return;
+        int selectedCount = WidgetConfig.cleanNotificationPackages(
+                config.notificationFilterPackages).size();
+        notificationFilterAppsButton.setText("选择应用（" + selectedCount + "）");
+        boolean enabled = config.notificationFilterMode != WidgetConfig.NOTIFICATION_FILTER_OFF;
+        notificationFilterAppsButton.setEnabled(enabled);
+        if (!enabled) {
+            notificationFilterSummary.setText("筛选已关闭，将显示所有应用的通知。");
+        } else if (config.notificationFilterMode
+                == WidgetConfig.NOTIFICATION_FILTER_WHITELIST) {
+            notificationFilterSummary.setText(selectedCount == 0
+                    ? "白名单为空时不会显示通知。"
+                    : "仅显示所选应用的通知，共 " + selectedCount + " 个应用。");
+        } else {
+            notificationFilterSummary.setText("隐藏所选应用的通知，共 "
+                    + selectedCount + " 个应用。");
+        }
+    }
+
+    private void chooseNotificationFilterApps() {
+        ArrayList<NotificationApp> apps = installedNotificationApps();
+        LinkedHashSet<String> selectedPackages = new LinkedHashSet<>(
+                WidgetConfig.cleanNotificationPackages(config.notificationFilterPackages));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        EditText search = edit("搜索应用名称或包名");
+        content.addView(search, matchWrap());
+        ListView list = new ListView(this);
+        // Checked state is restored from the package set in the adapter.
+        // ListView's positional choice state would override it on first bind.
+        NotificationAppAdapter adapter = new NotificationAppAdapter(apps, selectedPackages);
+        list.setAdapter(adapter);
+        list.setOnItemClickListener((parent, view, position, id) -> {
+            NotificationApp app = adapter.getItem(position);
+            if (!selectedPackages.remove(app.packageName)) {
+                selectedPackages.add(app.packageName);
+            }
+            adapter.notifyDataSetChanged();
+        });
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, dp(440));
+        listParams.topMargin = dp(8);
+        content.addView(list, listParams);
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count,
+                                                    int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before,
+                                                int count) {
+                adapter.filter(s == null ? "" : s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("选择通知应用")
+                .setView(content, dp(20), dp(8), dp(20), 0)
+                .setPositiveButton("完成", (dialog, which) -> {
+                    config.notificationFilterPackages.clear();
+                    config.notificationFilterPackages.addAll(
+                            WidgetConfig.cleanNotificationPackages(
+                                    new ArrayList<>(selectedPackages)));
+                    updateNotificationFilterSummary();
+                    renderLivePreview();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private ArrayList<NotificationApp> installedNotificationApps() {
+        ArrayList<NotificationApp> apps = new ArrayList<>();
+        PackageManager manager = getPackageManager();
+        try {
+            for (ApplicationInfo info : manager.getInstalledApplications(0)) {
+                String packageName = info.packageName;
+                if (packageName == null || packageName.isEmpty()) continue;
+                CharSequence appLabel;
+                try {
+                    appLabel = manager.getApplicationLabel(info);
+                } catch (Throwable ignored) {
+                    appLabel = packageName;
+                }
+                apps.add(new NotificationApp(appLabel == null
+                        ? packageName : appLabel.toString(), packageName));
+            }
+        } catch (Throwable ignored) {
+        }
+        java.text.Collator collator = java.text.Collator.getInstance(Locale.getDefault());
+        apps.sort((left, right) -> {
+            int byLabel = collator.compare(left.label, right.label);
+            return byLabel == 0 ? left.packageName.compareTo(right.packageName) : byLabel;
+        });
+        return apps;
+    }
+
+    private static final class NotificationApp {
+        final String label;
+        final String packageName;
+
+        NotificationApp(String label, String packageName) {
+            this.label = label;
+            this.packageName = packageName;
+        }
+    }
+
+    private final class NotificationAppAdapter extends BaseAdapter {
+        private final ArrayList<NotificationApp> allApps;
+        private final ArrayList<NotificationApp> visibleApps = new ArrayList<>();
+        private final Set<String> selectedPackages;
+
+        NotificationAppAdapter(ArrayList<NotificationApp> apps, Set<String> selected) {
+            allApps = apps;
+            selectedPackages = selected;
+            visibleApps.addAll(apps);
+        }
+
+        void filter(String query) {
+            String needle = query.trim().toLowerCase(Locale.ROOT);
+            visibleApps.clear();
+            if (needle.isEmpty()) {
+                visibleApps.addAll(allApps);
+            } else {
+                for (NotificationApp app : allApps) {
+                    if (app.label.toLowerCase(Locale.ROOT).contains(needle)
+                            || app.packageName.toLowerCase(Locale.ROOT).contains(needle)) {
+                        visibleApps.add(app);
+                    }
+                }
+            }
+            notifyDataSetChanged();
+        }
+
+        @Override public int getCount() { return visibleApps.size(); }
+        @Override public NotificationApp getItem(int position) { return visibleApps.get(position); }
+        @Override public long getItemId(int position) {
+            return visibleApps.get(position).packageName.hashCode();
+        }
+
+        @Override
+        public View getView(int position, View recycled, android.view.ViewGroup parent) {
+            CheckedTextView row;
+            if (recycled instanceof CheckedTextView) {
+                row = (CheckedTextView) recycled;
+            } else {
+                row = (CheckedTextView) getLayoutInflater().inflate(
+                        android.R.layout.simple_list_item_multiple_choice, parent, false);
+                row.setMinHeight(dp(56));
+                row.setPadding(dp(8), dp(8), dp(8), dp(8));
+                row.setTextSize(15);
+            }
+            NotificationApp app = getItem(position);
+            row.setText(app.label + "\n" + app.packageName);
+            row.setChecked(selectedPackages.contains(app.packageName));
+            return row;
+        }
     }
 
     private void createMamlEditor(LinearLayout root) {

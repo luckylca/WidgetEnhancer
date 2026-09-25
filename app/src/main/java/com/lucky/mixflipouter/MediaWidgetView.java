@@ -294,7 +294,8 @@ final class MediaWidgetView extends FrameLayout {
         }
         if (WidgetComponent.TYPE_NOTIFICATION_LIST.equals(component.type)) {
             notificationList = new NotificationListView(getContext(), interactive,
-                    config.notificationCount);
+                    config.notificationCount, config.notificationFilterMode,
+                    config.notificationFilterPackages);
             notificationList.setCallback(new NotificationListView.Callback() {
                 @Override
                 public void onOpen(String key) {

@@ -98,7 +98,7 @@ public final class ConfigProvider extends ContentProvider {
         if ("get_playback_state".equals(method)) return PlaybackStateStore.provider().snapshot();
         if ("get_notifications".equals(method)) {
             NotificationStateStore.requestRebindIfDisconnected(getContext());
-            return NotificationStateStore.snapshot();
+            return NotificationStateStore.snapshotAll();
         }
         if ("open_notification".equals(method)) {
             return NotificationStateStore.open(getContext(), arg);
