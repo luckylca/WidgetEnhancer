@@ -98,6 +98,9 @@ public final class WidgetEditorActivity extends Activity {
         setContentView(createContent());
         SystemBars.apply(this);
         loadValues();
+        if (getIntent().getBooleanExtra("debug_show_maml_cache_picker", false)) {
+            scroll.post(this::showMamlCachePicker);
+        }
     }
 
     private View createContent() {
@@ -293,6 +296,11 @@ public final class WidgetEditorActivity extends Activity {
         LinearLayout.LayoutParams zipParams = matchWrap();
         zipParams.topMargin = dp(8);
         root.addView(importZip, zipParams);
+        MaterialButton importCache = outlinedButton(
+                "添加外屏缓存的小部件", v -> showMamlCachePicker());
+        LinearLayout.LayoutParams cacheParams = matchWrap();
+        cacheParams.topMargin = dp(8);
+        root.addView(importCache, cacheParams);
 
         TextView hint = text("按住槽位拖动摆放，点按可调整尺寸、圆角或删除；首次在外屏显示需按提示授权。", 14,
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
@@ -342,6 +350,98 @@ public final class WidgetEditorActivity extends Activity {
                 .setType("*/*"), PICK_MAML_ZIP);
     }
 
+    private void showMamlCachePicker() {
+        java.util.List<MamlCacheStore.Item> items = MamlCacheStore.list(this);
+        if (items.isEmpty()) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("外屏缓存小部件")
+                    .setMessage("还没有同步到缓存小部件。请确认 LSPosed 已勾选 com.miui.home，打开一次外屏小部件列表并稍等片刻后再试。")
+                    .setPositiveButton("知道了", null)
+                    .show();
+            return;
+        }
+
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        ScrollView list = new ScrollView(this);
+        list.setFillViewport(false);
+        list.addView(rows, new ScrollView.LayoutParams(-1, -2));
+        androidx.appcompat.app.AlertDialog[] pickerDialog =
+                new androidx.appcompat.app.AlertDialog[1];
+        for (MamlCacheStore.Item item : items) {
+            LinearLayout row = horizontal();
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+            ImageView image = new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            // MAML packages often store transparent thumbnails with dark artwork.
+            image.setBackgroundColor(Color.WHITE);
+            File previewFile = MamlCacheStore.previewFile(this, item.id);
+            if (previewFile.isFile()) {
+                Bitmap bitmap = BitmapFactory.decodeFile(previewFile.getAbsolutePath());
+                if (bitmap != null) image.setImageBitmap(bitmap);
+            }
+            row.addView(image, new LinearLayout.LayoutParams(dp(88), dp(104)));
+
+            LinearLayout details = new LinearLayout(this);
+            details.setOrientation(LinearLayout.VERTICAL);
+            details.setGravity(Gravity.CENTER_VERTICAL);
+            details.setPadding(dp(12), 0, 0, 0);
+            TextView name = text(item.name, 16,
+                    color(com.google.android.material.R.attr.colorOnSurface));
+            name.setMaxLines(2);
+            TextView subtitle = text(previewFile.isFile()
+                            ? "外屏缓存 · 点按添加" : "外屏缓存 · 包内无预览图",
+                    13, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+            subtitle.setPadding(0, dp(5), 0, 0);
+            details.addView(name, matchWrap());
+            details.addView(subtitle, matchWrap());
+            row.addView(details, new LinearLayout.LayoutParams(0, -2, 1f));
+            row.setContentDescription(item.name + "，外屏缓存小部件");
+            row.setOnClickListener(v -> {
+                if (pickerDialog[0] != null) pickerDialog[0].dismiss();
+                importCachedMaml(item);
+            });
+            rows.addView(row, matchWrap());
+            View divider = new View(this);
+            divider.setBackgroundColor(0x22000000);
+            rows.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+        }
+
+        pickerDialog[0] = new MaterialAlertDialogBuilder(this)
+                .setTitle("选择外屏缓存小部件")
+                .setView(list, dp(8), 0, dp(8), 0)
+                .setNegativeButton("取消", null)
+                .create();
+        pickerDialog[0].show();
+    }
+
+    private void importCachedMaml(MamlCacheStore.Item item) {
+        WidgetComponent slot = WidgetComponent.mamlSlot(item.name, 2, 2);
+        config.components.add(slot);
+        refreshAppWidgetGrid();
+        Toast.makeText(this, "正在添加缓存小部件…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                int[] size = MamlImporter.importSlot(repository, config.id, slot.id,
+                        MamlCacheStore.packageFile(this, item.id));
+                runOnUiThread(() -> {
+                    slot.content = AppWidgetLayoutEngine.formatSize(size[0], size[1]);
+                    repository.save(config);
+                    refreshAppWidgetGrid();
+                });
+            } catch (Throwable error) {
+                runOnUiThread(() -> {
+                    config.components.remove(slot);
+                    refreshAppWidgetGrid();
+                    Toast.makeText(this, "添加失败：" + error.getMessage(),
+                            Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "maml-cache-import").start();
+    }
+
     private String queryDisplayName(Uri uri) {
         try (android.database.Cursor cursor = getContentResolver().query(uri, null,
                 null, null, null)) {
@@ -387,6 +487,7 @@ public final class WidgetEditorActivity extends Activity {
         config.components.remove(component);
         if (ActionSpec.HOST_MAML.equals(component.actionType)) {
             repository.mamlSlotFile(config.id, component.id).delete();
+            repository.mamlSlotPreviewFile(config.id, component.id).delete();
         }
         refreshAppWidgetGrid();
     }

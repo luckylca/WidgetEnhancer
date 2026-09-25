@@ -74,6 +74,17 @@ public final class ConfigProvider extends ContentProvider {
             saveHookReport(extras);
             return Bundle.EMPTY;
         }
+        if ("has_maml_cache".equals(method)) {
+            enforceMamlCacheCaller();
+            Bundle result = new Bundle();
+            result.putBoolean("known", MamlCacheStore.hasFingerprint(getContext(), arg,
+                    extras == null ? null : extras.getString("fingerprint")));
+            return result;
+        }
+        if ("publish_maml_cache".equals(method)) {
+            enforceMamlCacheCaller();
+            return publishMamlCache(arg, extras);
+        }
         enforceAllowedCaller();
         if ("get_config".equals(method) || "get_widget".equals(method)) {
             return getWidget(arg == null ? Contract.DEFAULT_WIDGET_ID : arg);
@@ -124,6 +135,32 @@ public final class ConfigProvider extends ContentProvider {
         if (repository.isSafeMode()) return null;
         WidgetConfig config = repository.get(widgetId);
         return config == null ? null : config.toBundle(repository.revision());
+    }
+
+    private Bundle publishMamlCache(String id, Bundle extras) {
+        Bundle result = new Bundle();
+        if (extras == null) {
+            result.putBoolean("ok", false);
+            result.putString("message", "缓存小部件数据不完整");
+            return result;
+        }
+        ParcelFileDescriptor archive = extras.getParcelable("archive");
+        if (archive == null) {
+            result.putBoolean("ok", false);
+            result.putString("message", "找不到缓存小部件文件");
+            return result;
+        }
+        try {
+            MamlCacheStore.publish(getContext(), id, extras.getString("name"),
+                    extras.getString("fingerprint"), archive);
+            result.putBoolean("ok", true);
+        } catch (Throwable error) {
+            try { archive.close(); } catch (Throwable ignored) {}
+            result.putBoolean("ok", false);
+            result.putString("message", error.getMessage() == null
+                    ? "无法导入缓存小部件" : error.getMessage());
+        }
+        return result;
     }
 
     private synchronized Bundle setAppWidgetId(String widgetId, Bundle extras) {
@@ -459,6 +496,19 @@ public final class ConfigProvider extends ContentProvider {
         if (Binder.getCallingUid() != android.os.Process.myUid()) {
             throw new SecurityException("Only the module app can change system state");
         }
+    }
+
+    private void enforceMamlCacheCaller() {
+        int uid = Binder.getCallingUid();
+        if (uid == android.os.Process.myUid()) return;
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        if (packages != null) {
+            for (String name : packages) {
+                if (Contract.TARGET_PACKAGE.equals(name)
+                        || Contract.MAML_CACHE_PACKAGE.equals(name)) return;
+            }
+        }
+        throw new SecurityException("Caller cannot access the launcher MAML cache");
     }
 
     private void enforceNeteaseCaller() {

@@ -6,8 +6,10 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.media.MediaMetadataRetriever;
@@ -20,7 +22,7 @@ import java.util.Locale;
 final class PreviewRenderer {
     private static final int WIDTH = 440;
     private static final int HEIGHT = 720;
-    private static final int RENDER_VERSION = 10;
+    private static final int RENDER_VERSION = 11;
 
     static File ensure(Context context, WidgetConfig config, File media, long revision) {
         String id = config == null ? "missing" : safeFilePart(config.id);
@@ -152,7 +154,7 @@ final class PreviewRenderer {
             return;
         }
         if (WidgetTypeRegistry.APPWIDGET.equals(typeId)) {
-            drawAppWidgetPreview(canvas, config);
+            drawAppWidgetPreview(context, canvas, config);
             return;
         }
         Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -255,7 +257,8 @@ final class PreviewRenderer {
         }
     }
 
-    private static void drawAppWidgetPreview(Canvas canvas, WidgetConfig config) {
+    private static void drawAppWidgetPreview(Context context, Canvas canvas,
+                                             WidgetConfig config) {
         if (config == null) return;
         Paint box = new Paint(Paint.ANTI_ALIAS_FLAG);
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -272,20 +275,52 @@ final class PreviewRenderer {
             float top = component.y + 6;
             float right = component.x + component.width - 6;
             float bottom = component.y + component.height - 6;
-            box.setColor(0x2effffff);
-            canvas.drawRoundRect(left, top, right, bottom, 24, 24, box);
+            RectF rect = new RectF(left, top, right, bottom);
+            boolean hasPreview = drawMamlSlotPreview(context, canvas, config, component, rect);
+            if (!hasPreview) {
+                box.setColor(0x2effffff);
+                canvas.drawRoundRect(rect, 24, 24, box);
+            }
             box.setStyle(Paint.Style.STROKE);
             box.setStrokeWidth(2f);
             box.setColor(0x55ffffff);
-            canvas.drawRoundRect(left, top, right, bottom, 24, 24, box);
+            canvas.drawRoundRect(rect, 24, 24, box);
             box.setStyle(Paint.Style.FILL);
+            float labelY = hasPreview ? bottom - 12 : (top + bottom) / 2f + 8;
             canvas.drawText(AppWidgetLayoutEngine.sizeLabel(component.content),
-                    (left + right) / 2f, (top + bottom) / 2f + 8, text);
+                    (left + right) / 2f, labelY, text);
         }
         if (!any) {
             text.setTextSize(25);
             canvas.drawText("在编辑器中添加应用小部件", WIDTH / 2f, HEIGHT / 2f, text);
         }
+    }
+
+    private static boolean drawMamlSlotPreview(Context context, Canvas canvas,
+                                               WidgetConfig config, WidgetComponent component,
+                                               RectF rect) {
+        if (!ActionSpec.HOST_MAML.equals(component.actionType)) return false;
+        File previewFile = new File(new File(context.getFilesDir(),
+                "widgets/" + safeFilePart(config.id)),
+                "maml-" + safeFilePart(component.id) + "-preview.png");
+        if (!previewFile.isFile()) return false;
+        Bitmap bitmap = decodeSampled(previewFile);
+        if (bitmap == null) return false;
+        Path clip = new Path();
+        clip.addRoundRect(rect, 24, 24, Path.Direction.CW);
+        int save = canvas.save();
+        canvas.clipPath(clip);
+        float scale = Math.max(rect.width() / bitmap.getWidth(),
+                rect.height() / bitmap.getHeight());
+        Matrix matrix = new Matrix();
+        matrix.setScale(scale, scale);
+        matrix.postTranslate(rect.centerX() - bitmap.getWidth() * scale / 2f,
+                rect.centerY() - bitmap.getHeight() * scale / 2f);
+        Paint image = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        canvas.drawBitmap(bitmap, matrix, image);
+        canvas.restoreToCount(save);
+        bitmap.recycle();
+        return true;
     }
 
     private static void drawVideoBadge(Canvas canvas) {

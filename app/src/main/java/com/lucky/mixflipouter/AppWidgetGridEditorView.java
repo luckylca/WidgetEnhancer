@@ -3,14 +3,21 @@ package com.lucky.mixflipouter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.io.File;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Jigsaw-style editor for hosted AppWidget slots: renders the 2 x 3 outer-screen
@@ -30,6 +37,10 @@ final class AppWidgetGridEditorView extends View {
     private final Paint slotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint previewPaint = new Paint(Paint.ANTI_ALIAS_FLAG
+            | Paint.FILTER_BITMAP_FLAG);
+    private final Map<String, android.graphics.Bitmap> mamlPreviews = new HashMap<>();
+    private final Map<String, Long> previewModified = new HashMap<>();
     private final int touchSlop;
     private WidgetConfig config;
     private Callback callback;
@@ -68,7 +79,46 @@ final class AppWidgetGridEditorView extends View {
     void setConfig(WidgetConfig value) {
         config = value;
         dragging = null;
+        refreshMamlPreviews(value);
         invalidate();
+    }
+
+    private void refreshMamlPreviews(WidgetConfig value) {
+        Set<String> live = new HashSet<>();
+        if (value != null) {
+            for (WidgetComponent component : value.components) {
+                if (!ActionSpec.HOST_MAML.equals(component.actionType)) continue;
+                live.add(component.id);
+                File preview = mamlPreviewFile(value.id, component.id);
+                long modified = preview.isFile() ? preview.lastModified() : 0;
+                Long cachedModified = previewModified.get(component.id);
+                if (modified == 0) {
+                    recyclePreview(component.id);
+                } else if (cachedModified == null || cachedModified != modified) {
+                    recyclePreview(component.id);
+                    android.graphics.Bitmap bitmap = android.graphics.BitmapFactory.decodeFile(
+                            preview.getAbsolutePath());
+                    if (bitmap != null) {
+                        mamlPreviews.put(component.id, bitmap);
+                        previewModified.put(component.id, modified);
+                    }
+                }
+            }
+        }
+        for (String id : new ArrayList<>(mamlPreviews.keySet())) {
+            if (!live.contains(id)) recyclePreview(id);
+        }
+    }
+
+    private void recyclePreview(String componentId) {
+        android.graphics.Bitmap previous = mamlPreviews.remove(componentId);
+        if (previous != null && !previous.isRecycled()) previous.recycle();
+        previewModified.remove(componentId);
+    }
+
+    private File mamlPreviewFile(String widgetId, String componentId) {
+        return new File(new File(getContext().getFilesDir(), "widgets/" + widgetId),
+                "maml-" + componentId + "-preview.png");
     }
 
     void setCallback(Callback value) {
@@ -142,9 +192,29 @@ final class AppWidgetGridEditorView extends View {
     private void drawSlot(Canvas canvas, WidgetComponent slot, float left, float top,
                           float width, float height, boolean raised) {
         RectF rect = new RectF(left, top, left + width, top + height);
-        slotPaint.setColor(raised ? 0x8FFFFFFF : (slot.visible ? 0x59FFFFFF : 0x33FFFFFF));
         float radius = Math.min(width, height) * 0.12f;
-        canvas.drawRoundRect(rect, radius, radius, slotPaint);
+        android.graphics.Bitmap preview = ActionSpec.HOST_MAML.equals(slot.actionType)
+                ? mamlPreviews.get(slot.id) : null;
+        if (preview != null && !preview.isRecycled()) {
+            Path clip = new Path();
+            clip.addRoundRect(rect, radius, radius, Path.Direction.CW);
+            int save = canvas.save();
+            canvas.clipPath(clip);
+            float scale = Math.max(rect.width() / preview.getWidth(),
+                    rect.height() / preview.getHeight());
+            Matrix matrix = new Matrix();
+            matrix.setScale(scale, scale);
+            matrix.postTranslate(rect.centerX() - preview.getWidth() * scale / 2f,
+                    rect.centerY() - preview.getHeight() * scale / 2f);
+            canvas.drawBitmap(preview, matrix, previewPaint);
+            canvas.restoreToCount(save);
+            slotPaint.setColor(raised ? 0x18000000 : 0x30000000);
+            canvas.drawRoundRect(rect, radius, radius, slotPaint);
+        } else {
+            slotPaint.setColor(raised ? 0x8FFFFFFF
+                    : (slot.visible ? 0x59FFFFFF : 0x33FFFFFF));
+            canvas.drawRoundRect(rect, radius, radius, slotPaint);
+        }
         canvas.drawRoundRect(rect, radius, radius, strokePaint);
         if (callback != null) {
             float cx = rect.centerX();

@@ -170,6 +170,36 @@ final class WidgetRepository {
         return new File(widgetDir(widgetId), "maml-" + componentId + ".mtz");
     }
 
+    File mamlSlotPreviewFile(String widgetId, String componentId) {
+        return new File(widgetDir(widgetId), "maml-" + componentId + "-preview.png");
+    }
+
+    void writeMamlSlotPreview(String widgetId, String componentId, byte[] preview)
+            throws Exception {
+        File target = mamlSlotPreviewFile(widgetId, componentId);
+        if (preview == null || preview.length == 0) {
+            target.delete();
+            return;
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IllegalStateException("无法创建小部件预览目录");
+        }
+        File temporary = new File(parent, target.getName() + ".tmp");
+        try (FileOutputStream out = new FileOutputStream(temporary, false)) {
+            out.write(preview);
+            out.getFD().sync();
+        } catch (Throwable error) {
+            temporary.delete();
+            if (error instanceof Exception) throw (Exception) error;
+            throw new IllegalStateException("无法保存小部件预览图", error);
+        }
+        if (!temporary.renameTo(target)) {
+            temporary.delete();
+            throw new IllegalStateException("无法保存小部件预览图");
+        }
+    }
+
     void importMedia(String id, Uri source) throws Exception {
         File target = mediaFile(id);
         File parent = target.getParentFile();

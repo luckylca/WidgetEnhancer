@@ -196,6 +196,8 @@ public final class DeviceTestActivity extends Activity {
             startActivity(new Intent(this, WidgetEditorActivity.class)
                     .putExtra(WidgetEditorActivity.EXTRA_DEBUG_TYPE_ID,
                             getIntent().getStringExtra(WidgetEditorActivity.EXTRA_DEBUG_TYPE_ID))
+                    .putExtra("debug_show_maml_cache_picker",
+                            getIntent().getBooleanExtra("debug_show_maml_cache_picker", false))
                     .putExtra(WidgetEditorActivity.EXTRA_DEBUG_SCROLL_Y,
                             getIntent().getIntExtra(
                                     WidgetEditorActivity.EXTRA_DEBUG_SCROLL_Y, 0)));

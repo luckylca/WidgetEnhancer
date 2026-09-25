@@ -22,7 +22,7 @@ final class WidgetTypeRegistry {
         types.add(new Type(MUSIC, "音乐", "歌词与媒体控制"));
         types.add(new Type(SHORTCUTS, "快捷按钮", "纵向排列系统操作或应用入口"));
         types.add(new Type(NOTIFICATIONS, "通知", "最近三条通知，点击跳转，左滑删除"));
-        types.add(new Type(APPWIDGET, "应用小部件", "添加手机应用的小部件或 ZIP 小部件包，自由组合尺寸"));
+        types.add(new Type(APPWIDGET, "应用小部件", "添加手机应用、ZIP 包或外屏缓存小部件，自由组合尺寸"));
         types.add(new Type(MAML, "系统小部件", "导入 ZIP / 主题商店的小部件包"));
         TYPES = Collections.unmodifiableList(types);
     }

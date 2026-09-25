@@ -1,5 +1,6 @@
 package com.lucky.mixflipouter;
 
+import android.app.Application;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -23,6 +24,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final String MAML_COMPAT_CLASS = "com.miui.fliphome.widget.ui.maml.FlipMaMlWidgetCompat";
     private static final String VIEW_MODEL_CLASS = "com.miui.fliphome.settings.widget.WidgetViewModel";
     private static volatile String fallbackMamlPath;
+    private static volatile long lastMamlCacheScanAt;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
@@ -43,8 +45,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             return;
         }
+        if (Contract.MAML_CACHE_PACKAGE.equals(param.packageName)) {
+            hookMamlCacheSource();
+            return;
+        }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
         try {
+            hookMamlCacheSource();
             Class<?> infoClass = XposedHelpers.findClass(INFO_CLASS, param.classLoader);
             hookCatalogue(param.classLoader, infoClass);
             hookGroupTitle(param.classLoader);
@@ -55,6 +62,53 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: unsupported FlipHome build: " + error);
         }
+    }
+
+    /** Cache files live in the launcher's private files directory, so scan them
+     * in that package process and publish bounded copies through our Provider. */
+    private static void hookMamlCacheSource() {
+        try {
+            XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            try {
+                                Context context = (Context) hook.args[0];
+                                scheduleMamlCacheScan(context);
+                            } catch (Throwable error) {
+                                XposedBridge.log("MixFlipCustom: MAML cache scan start failed: "
+                                        + error);
+                            }
+                        }
+                    });
+            XposedHelpers.findAndHookMethod(android.app.Activity.class, "onResume",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            try {
+                                scheduleMamlCacheScan((Context) hook.thisObject);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    });
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: MAML cache scan hook unavailable: " + error);
+        }
+    }
+
+    private static void scheduleMamlCacheScan(Context context) {
+        if (context == null) return;
+        String packageName = context.getPackageName();
+        if (!Contract.MAML_CACHE_PACKAGE.equals(packageName)
+                && !Contract.TARGET_PACKAGE.equals(packageName)) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMamlCacheScanAt < 15_000L) return;
+        synchronized (HookEntry.class) {
+            now = System.currentTimeMillis();
+            if (now - lastMamlCacheScanAt < 15_000L) return;
+            lastMamlCacheScanAt = now;
+        }
+        new Thread(() -> MamlCacheScanner.sync(context), "maml-cache-scan").start();
     }
 
     private static void hookCatalogue(ClassLoader loader, Class<?> infoClass) {
