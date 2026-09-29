@@ -68,7 +68,7 @@ final class LiveRefreshBridge {
         }
     }
 
-    private static void refreshNow() {
+    static void refreshNow() {
         Context activeContext = context;
         ClassLoader loader = classLoader;
         if (activeContext == null || loader == null) return;

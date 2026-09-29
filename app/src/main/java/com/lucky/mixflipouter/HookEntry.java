@@ -46,7 +46,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return;
         }
         if (Contract.MAML_CACHE_PACKAGE.equals(param.packageName)) {
-            hookMamlCacheSource();
+            hookMamlCacheSource(param.classLoader);
             return;
         }
         if (Contract.PERSONAL_ASSISTANT_PACKAGE.equals(param.packageName)) {
@@ -55,7 +55,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
         try {
-            hookMamlCacheSource();
+            hookMamlCacheSource(param.classLoader);
             Class<?> infoClass = XposedHelpers.findClass(INFO_CLASS, param.classLoader);
             hookCatalogue(param.classLoader, infoClass);
             hookGroupTitle(param.classLoader);
@@ -70,7 +70,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     /** Cache files live in the launcher's private files directory, so scan them
      * in that package process and publish bounded copies through our Provider. */
-    private static void hookMamlCacheSource() {
+    private static void hookMamlCacheSource(ClassLoader loader) {
         try {
             XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class,
                     new XC_MethodHook() {
@@ -79,6 +79,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             try {
                                 Context context = (Context) hook.args[0];
                                 scheduleMamlCacheScan(context);
+                                UnlockRecovery.onApplicationAttach(context, loader);
                             } catch (Throwable error) {
                                 XposedBridge.log("MixFlipCustom: MAML cache scan start failed: "
                                         + error);
