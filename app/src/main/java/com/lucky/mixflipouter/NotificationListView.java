@@ -80,6 +80,8 @@ final class NotificationListView extends FrameLayout {
         emptyView.setText("暂无通知");
         emptyView.setTextColor(WallpaperColorState.secondaryTextColor());
         emptyView.setGravity(Gravity.CENTER);
+        emptyView.setSingleLine(true);
+        emptyView.setEllipsize(TextUtils.TruncateAt.END);
         emptyView.setVisibility(GONE);
         addView(emptyView, new LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -187,6 +189,7 @@ final class NotificationListView extends FrameLayout {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int width = MeasureSpec.getSize(widthMeasureSpec);
         int height = MeasureSpec.getSize(heightMeasureSpec);
         if (height > 0) {
             int visibleRows = 0;
@@ -194,14 +197,20 @@ final class NotificationListView extends FrameLayout {
                 if (row.getVisibility() == VISIBLE) visibleRows++;
             }
             int rowHeight = Math.max(1, height / Math.max(1, visibleRows));
-            int iconSize = Math.max(1, Math.round(rowHeight * 0.36f));
-            float titleSize = Math.max(8f, rowHeight * 0.185f);
-            float contentSize = Math.max(8f, rowHeight * 0.15f);
+            // Fewer rows means taller rows but the same width, so cap every
+            // horizontally spent metric by the width: otherwise a single tall
+            // row pushes icon and text clean past the card edge.
+            int horizontal = Math.max(4, Math.round(Math.min(rowHeight * 0.08f, width * 0.06f)));
+            int iconSize = Math.max(1, Math.round(Math.min(rowHeight * 0.36f, width * 0.26f)));
+            float titleSize = Math.max(8f, Math.min(rowHeight * 0.185f, width * 0.11f));
+            float contentSize = Math.max(8f, Math.min(rowHeight * 0.15f, width * 0.09f));
             for (RowView row : rows) {
-                row.applyMetrics(iconSize, titleSize, contentSize, rowHeight);
+                row.applyMetrics(iconSize, titleSize, contentSize, rowHeight, horizontal);
             }
+            // With zero rows rowHeight is the full layer height; keep the empty
+            // hint at a modest size instead of scaling it off the card.
             emptyView.setTextSize(TypedValue.COMPLEX_UNIT_PX,
-                    Math.max(10f, rowHeight * 0.3f));
+                    Math.max(10f, Math.min(height * 0.08f, width * 0.09f)));
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
@@ -297,6 +306,7 @@ final class NotificationListView extends FrameLayout {
         private int iconSize = 1;
         private float titleSize = 12f;
         private float contentSize = 10f;
+        private int horizontalMargin = -1;
 
         RowView(Context context) {
             super(context);
@@ -361,14 +371,13 @@ final class NotificationListView extends FrameLayout {
         }
 
         void applyMetrics(int newIconSize, float newTitleSize, float newContentSize,
-                          int rowHeight) {
+                          int rowHeight, int horizontal) {
             int targetIcon = Math.max(1, newIconSize);
             LinearLayout.LayoutParams rowParams = (LinearLayout.LayoutParams) getLayoutParams();
             if (rowParams != null && rowParams.height != rowHeight) {
                 rowParams.height = rowHeight;
                 setLayoutParams(rowParams);
             }
-            int horizontal = Math.max(4, Math.round(rowHeight * 0.08f));
             FrameLayout.LayoutParams cardParams = (FrameLayout.LayoutParams) card.getLayoutParams();
             cardParams.leftMargin = horizontal;
             cardParams.rightMargin = horizontal;
@@ -376,10 +385,11 @@ final class NotificationListView extends FrameLayout {
             cardParams.bottomMargin = Math.round(rowHeight * 0.05f);
             card.setLayoutParams(cardParams);
             if (iconSize == targetIcon && titleSize == newTitleSize
-                    && contentSize == newContentSize) return;
+                    && contentSize == newContentSize && horizontalMargin == horizontal) return;
             iconSize = targetIcon;
             titleSize = newTitleSize;
             contentSize = newContentSize;
+            horizontalMargin = horizontal;
             FrameLayout.LayoutParams iconParams = (FrameLayout.LayoutParams) icon.getLayoutParams();
             iconParams.width = iconSize;
             iconParams.height = iconSize;
