@@ -20,11 +20,17 @@ final class LyricsStateStore implements LyricsProvider {
     private static final String LEGACY_PREF_KEY = "lyrics_snapshot_v1";
     private static final String SNAPSHOT_FILE = "lyrics-snapshot-v2.json";
     private static final String LEGACY_SNAPSHOT_FILE = "lyrics-snapshot-v1.json";
+    /** Rolling broadcasts carry ~2 rows; anything this small asks for full lyrics. */
+    private static final int CONTEXT_MIN_LINES = 6;
 
     private final SharedPreferences preferences;
     private final AtomicFile snapshotFile;
     private final AtomicFile legacySnapshotFile;
     private LyricsData.Payload cached;
+    /** Full-song timeline fetched online; keyed to the current track only. */
+    private final ArrayList<LyricsData.Line> contextLines = new ArrayList<>();
+    private String contextTrackKey = "";
+    private long contextDelta = LyricContextWindow.NO_MATCH;
 
     LyricsStateStore(Context context) {
         preferences = context.getSharedPreferences(Contract.PREFS, 0);
@@ -61,12 +67,50 @@ final class LyricsStateStore implements LyricsProvider {
             cached = null;
             return failure("歌词缓存写入失败");
         }
+        recalibrate(incoming, playback);
+        maybeFetchContext(incoming);
         Bundle result = new Bundle();
         result.putBoolean("ok", true);
         result.putInt("line_count", incoming.lines.size());
         result.putString("source", incoming.source);
         result.putString("publisher", incoming.track.publisherPackage);
         result.putString("lyric_id", incoming.track.lyricId);
+        return result;
+    }
+
+    @Override
+    public synchronized Bundle publishContext(Bundle raw) {
+        if (raw == null) return failure("整首歌词数据为空");
+        LyricsData.Payload current = load();
+        if (current == null) return failure("没有当前歌词");
+        String trackKey = LyricsData.clean(raw.getString("track_key", ""), 80);
+        if (!trackKey.isEmpty() && !trackKey.equals(current.track.trackKey)) {
+            return failure("整首歌词与当前歌曲不匹配");
+        }
+        LyricsData.Track meta = new LyricsData.Track();
+        meta.title = LyricsData.clean(raw.getString("title", ""), LyricsData.MAX_TEXT_LENGTH);
+        meta.artist = LyricsData.clean(raw.getString("artist", ""), LyricsData.MAX_TEXT_LENGTH);
+        meta.duration = Math.max(0, raw.getLong("duration", 0));
+        if (!LyricTrackMatcher.matches(current.track, meta)) {
+            return failure("整首歌词与当前歌曲不匹配");
+        }
+        ArrayList<LyricsData.Line> lines = parseLines(raw);
+        if (lines.size() < 3) return failure("整首歌词行数过少");
+        lines.sort(Comparator.comparingLong(line -> line.start));
+        contextLines.clear();
+        contextLines.addAll(lines);
+        contextTrackKey = current.track.trackKey;
+        contextDelta = LyricContextWindow.NO_MATCH;
+        LyricsData.Line currentLine = currentLineOf(current);
+        if (currentLine != null) {
+            long reference = current.position > 0 ? current.position : currentLine.start;
+            contextDelta = LyricContextWindow.calibrate(
+                    contextLines, currentLine.content, currentLine.start, reference);
+        }
+        if (!writeSnapshot(current)) return failure("歌词缓存写入失败");
+        Bundle result = new Bundle();
+        result.putBoolean("ok", true);
+        result.putInt("line_count", lines.size());
         return result;
     }
 
@@ -106,6 +150,9 @@ final class LyricsStateStore implements LyricsProvider {
         out.putBoolean("legacy_fallback", isLegacy(value.source));
         out.putLong("published_at", value.publishedAt);
         out.putInt("line_count", value.lines.size());
+        boolean contextUsable = !contextLines.isEmpty()
+                && contextTrackKey.equals(value.track.trackKey);
+        out.putInt("context_line_count", contextUsable ? contextLines.size() : 0);
         out.putInt("current_lyric_index", -1);
         out.putLong("lyric_offset", value.lyricOffset);
 
@@ -128,8 +175,17 @@ final class LyricsStateStore implements LyricsProvider {
         out.putString("match_status", matches ? "matched" : "mismatch");
         if (!matches) return unavailable(out, "当前歌曲歌词正在载入");
 
-        LyricLineResolver.Window window = LyricLineResolver.resolve(value.lines, position);
-        out.putBoolean("available", !value.lines.isEmpty());
+        LyricLineResolver.Window window;
+        if (contextUsable) {
+            // Full-song timeline fetched online; the publisher's broadcast
+            // keeps authority over which line is current via the calibrated
+            // delta, and its extras (逐字 words, translation) overlay the row.
+            window = LyricContextWindow.resolve(contextLines, position, contextDelta);
+            LyricContextWindow.overlay(window.current, currentLineOf(value));
+        } else {
+            window = LyricLineResolver.resolve(value.lines, position);
+        }
+        out.putBoolean("available", contextUsable || !value.lines.isEmpty());
         out.putInt("current_lyric_index", window.currentIndex);
         putLine(out, "previous", window.previous);
         putLine(out, "current", window.current);
@@ -164,36 +220,8 @@ final class LyricsStateStore implements LyricsProvider {
         payload.track.album = LyricsData.clean(raw.getString("album", ""),
                 LyricsData.MAX_TEXT_LENGTH);
         payload.track.mediaId = LyricsData.clean(raw.getString("media_id", ""), 300);
-        ArrayList<Bundle> rawLines = raw.getParcelableArrayList("lines");
-        if (rawLines != null) {
-            for (Bundle rawLine : rawLines) {
-                if (rawLine == null || payload.lines.size() >= LyricsData.MAX_LINES) break;
-                LyricsData.Line line = new LyricsData.Line();
-                line.start = Math.max(0, bundleLong(rawLine, "start", 0));
-                line.end = Math.max(line.start, bundleLong(rawLine, "end", line.start));
-                line.content = LyricsData.clean(rawLine.getString("content", ""),
-                        LyricsData.MAX_TEXT_LENGTH);
-                line.translation = LyricsData.clean(
-                        rawLine.getString("translation", ""), LyricsData.MAX_TEXT_LENGTH);
-                line.secondary = LyricsData.clean(rawLine.getString("secondary",
-                        rawLine.getString("romanization", "")), LyricsData.MAX_TEXT_LENGTH);
-                ArrayList<Bundle> rawWords = rawLine.getParcelableArrayList("words");
-                if (rawWords != null) {
-                    for (Bundle rawWord : rawWords) {
-                        if (rawWord == null
-                                || line.words.size() >= LyricsData.MAX_WORDS_PER_LINE) break;
-                        LyricsData.Word word = new LyricsData.Word();
-                        word.text = LyricsData.clean(rawWord.getString("text", ""),
-                                LyricsData.MAX_TEXT_LENGTH);
-                        word.start = Math.max(0, rawWord.getLong("start", 0));
-                        word.end = Math.max(word.start, rawWord.getLong("end", word.start));
-                        if (!word.text.isEmpty()) line.words.add(word);
-                    }
-                }
-                if (!line.content.isEmpty() || !line.translation.isEmpty()
-                        || !line.secondary.isEmpty()) payload.lines.add(line);
-            }
-        }
+        ArrayList<LyricsData.Line> parsedLines = parseLines(raw);
+        payload.lines.addAll(parsedLines);
 
         if (playback != null && playback.getBoolean("available")
                 && payload.track.publisherPackage.equals(playback.getString("package", ""))) {
@@ -214,6 +242,68 @@ final class LyricsStateStore implements LyricsProvider {
         return payload;
     }
 
+    @SuppressWarnings("deprecation")
+    private static ArrayList<LyricsData.Line> parseLines(Bundle raw) {
+        ArrayList<LyricsData.Line> out = new ArrayList<>();
+        ArrayList<Bundle> rawLines = raw.getParcelableArrayList("lines");
+        if (rawLines == null) return out;
+        for (Bundle rawLine : rawLines) {
+            if (rawLine == null || out.size() >= LyricsData.MAX_LINES) break;
+            LyricsData.Line line = new LyricsData.Line();
+            line.start = Math.max(0, bundleLong(rawLine, "start", 0));
+            line.end = Math.max(line.start, bundleLong(rawLine, "end", line.start));
+            line.content = LyricsData.clean(rawLine.getString("content", ""),
+                    LyricsData.MAX_TEXT_LENGTH);
+            line.translation = LyricsData.clean(
+                    rawLine.getString("translation", ""), LyricsData.MAX_TEXT_LENGTH);
+            line.secondary = LyricsData.clean(rawLine.getString("secondary",
+                    rawLine.getString("romanization", "")), LyricsData.MAX_TEXT_LENGTH);
+            ArrayList<Bundle> rawWords = rawLine.getParcelableArrayList("words");
+            if (rawWords != null) {
+                for (Bundle rawWord : rawWords) {
+                    if (rawWord == null
+                            || line.words.size() >= LyricsData.MAX_WORDS_PER_LINE) break;
+                    LyricsData.Word word = new LyricsData.Word();
+                    word.text = LyricsData.clean(rawWord.getString("text", ""),
+                            LyricsData.MAX_TEXT_LENGTH);
+                    word.start = Math.max(0, rawWord.getLong("start", 0));
+                    word.end = Math.max(word.start, rawWord.getLong("end", word.start));
+                    if (!word.text.isEmpty()) line.words.add(word);
+                }
+            }
+            if (!line.content.isEmpty() || !line.translation.isEmpty()
+                    || !line.secondary.isEmpty()) out.add(line);
+        }
+        return out;
+    }
+
+    private static LyricsData.Line currentLineOf(LyricsData.Payload payload) {
+        if (payload == null || payload.lines.isEmpty()) return null;
+        int index = payload.currentLyricIndex;
+        if (index < 0 || index >= payload.lines.size()) index = payload.lines.size() - 1;
+        return payload.lines.get(index);
+    }
+
+    /** Re-aligns the online timeline whenever the publisher reports a current line. */
+    private void recalibrate(LyricsData.Payload incoming, Bundle playback) {
+        if (contextLines.isEmpty() || !contextTrackKey.equals(incoming.track.trackKey)) return;
+        LyricsData.Line currentLine = currentLineOf(incoming);
+        if (currentLine == null) return;
+        long position = playback != null && playback.getBoolean("available")
+                ? Math.max(0, playback.getLong("position", 0)) : currentLine.start;
+        long delta = LyricContextWindow.calibrate(
+                contextLines, currentLine.content, currentLine.start, position);
+        if (delta != LyricContextWindow.NO_MATCH) contextDelta = delta;
+    }
+
+    /** Sparse rolling payloads (SuperLyric 3.4, NetEase hook) ask for full lyrics. */
+    private void maybeFetchContext(LyricsData.Payload incoming) {
+        if (incoming.track.title.isEmpty()) return;
+        if (incoming.lines.size() >= CONTEXT_MIN_LINES) return;
+        if (contextTrackKey.equals(incoming.track.trackKey) && !contextLines.isEmpty()) return;
+        OnlineLyricFetcher.request(incoming.track);
+    }
+
     private LyricsData.Payload load() {
         if (cached != null) return cached;
         String raw = readFile(snapshotFile);
@@ -222,7 +312,9 @@ final class LyricsStateStore implements LyricsProvider {
         if (raw == null || raw.isEmpty()) raw = preferences.getString(LEGACY_PREF_KEY, "");
         if (raw == null || raw.isEmpty()) return null;
         try {
-            cached = fromJson(new JSONObject(raw));
+            LyricsData.Payload payload = new LyricsData.Payload();
+            fromJson(new JSONObject(raw), payload);
+            cached = payload;
         } catch (Throwable ignored) {
             cached = null;
         }
@@ -241,14 +333,64 @@ final class LyricsStateStore implements LyricsProvider {
     private boolean writeSnapshot(LyricsData.Payload payload) {
         FileOutputStream output = null;
         try {
+            JSONObject json = toJson(payload);
+            if (!contextLines.isEmpty() && contextTrackKey.equals(payload.track.trackKey)) {
+                json.put("context", contextToJson());
+            }
             output = snapshotFile.startWrite();
-            output.write(toJson(payload).toString().getBytes(StandardCharsets.UTF_8));
+            output.write(json.toString().getBytes(StandardCharsets.UTF_8));
             snapshotFile.finishWrite(output);
             return true;
         } catch (Throwable error) {
             if (output != null) snapshotFile.failWrite(output);
             return false;
         }
+    }
+
+    private JSONObject contextToJson() throws Exception {
+        JSONArray rows = new JSONArray();
+        for (LyricsData.Line line : contextLines) rows.put(lineToJson(line));
+        return new JSONObject().put("trackKey", contextTrackKey)
+                .put("delta", contextDelta == LyricContextWindow.NO_MATCH ? 0 : contextDelta)
+                .put("lines", rows);
+    }
+
+    private static JSONObject lineToJson(LyricsData.Line line) throws Exception {
+        JSONArray words = new JSONArray();
+        for (LyricsData.Word word : line.words) {
+            words.put(new JSONObject().put("text", word.text)
+                    .put("start", word.start).put("end", word.end));
+        }
+        return new JSONObject().put("content", line.content)
+                .put("translation", line.translation).put("secondary", line.secondary)
+                .put("start", line.start).put("end", line.end).put("words", words);
+    }
+
+    private static LyricsData.Line lineFromJson(JSONObject rawLine) {
+        LyricsData.Line line = new LyricsData.Line();
+        line.content = LyricsData.clean(rawLine.optString("content", ""),
+                LyricsData.MAX_TEXT_LENGTH);
+        line.translation = LyricsData.clean(rawLine.optString("translation", ""),
+                LyricsData.MAX_TEXT_LENGTH);
+        line.secondary = LyricsData.clean(rawLine.optString("secondary",
+                rawLine.optString("romanization", "")), LyricsData.MAX_TEXT_LENGTH);
+        line.start = Math.max(0, rawLine.optLong("start", 0));
+        line.end = Math.max(line.start, rawLine.optLong("end", line.start));
+        JSONArray words = rawLine.optJSONArray("words");
+        if (words != null) {
+            for (int wordIndex = 0; wordIndex < Math.min(
+                    words.length(), LyricsData.MAX_WORDS_PER_LINE); wordIndex++) {
+                JSONObject rawWord = words.optJSONObject(wordIndex);
+                if (rawWord == null) continue;
+                LyricsData.Word word = new LyricsData.Word();
+                word.text = LyricsData.clean(rawWord.optString("text", ""),
+                        LyricsData.MAX_TEXT_LENGTH);
+                word.start = Math.max(0, rawWord.optLong("start", 0));
+                word.end = Math.max(word.start, rawWord.optLong("end", word.start));
+                if (!word.text.isEmpty()) line.words.add(word);
+            }
+        }
+        return line;
     }
 
     private static JSONObject toJson(LyricsData.Payload payload) throws Exception {
@@ -263,14 +405,7 @@ final class LyricsStateStore implements LyricsProvider {
                 .put("trackKey", payload.track.trackKey);
         JSONArray rows = new JSONArray();
         for (LyricsData.Line line : payload.lines) {
-            JSONArray words = new JSONArray();
-            for (LyricsData.Word word : line.words) {
-                words.put(new JSONObject().put("text", word.text)
-                        .put("start", word.start).put("end", word.end));
-            }
-            rows.put(new JSONObject().put("content", line.content)
-                    .put("translation", line.translation).put("secondary", line.secondary)
-                    .put("start", line.start).put("end", line.end).put("words", words));
+            rows.put(lineToJson(line));
         }
         return new JSONObject().put("schema", 2).put("source", payload.source)
                 .put("state", payload.state).put("track", track)
@@ -281,8 +416,7 @@ final class LyricsStateStore implements LyricsProvider {
                 .put("publisherActive", payload.publisherActive).put("lines", rows);
     }
 
-    private static LyricsData.Payload fromJson(JSONObject json) {
-        LyricsData.Payload payload = new LyricsData.Payload();
+    private void fromJson(JSONObject json, LyricsData.Payload payload) {
         payload.source = json.optString("source", "netease-hook");
         payload.state = json.optString("state", "");
         payload.position = Math.max(0, json.optLong("position", 0));
@@ -312,33 +446,25 @@ final class LyricsStateStore implements LyricsProvider {
             for (int i = 0; i < Math.min(rows.length(), LyricsData.MAX_LINES); i++) {
                 JSONObject rawLine = rows.optJSONObject(i);
                 if (rawLine == null) continue;
-                LyricsData.Line line = new LyricsData.Line();
-                line.content = LyricsData.clean(rawLine.optString("content", ""),
-                        LyricsData.MAX_TEXT_LENGTH);
-                line.translation = LyricsData.clean(rawLine.optString("translation", ""),
-                        LyricsData.MAX_TEXT_LENGTH);
-                line.secondary = LyricsData.clean(rawLine.optString("secondary",
-                        rawLine.optString("romanization", "")), LyricsData.MAX_TEXT_LENGTH);
-                line.start = Math.max(0, rawLine.optLong("start", 0));
-                line.end = Math.max(line.start, rawLine.optLong("end", line.start));
-                JSONArray words = rawLine.optJSONArray("words");
-                if (words != null) {
-                    for (int wordIndex = 0; wordIndex < Math.min(
-                            words.length(), LyricsData.MAX_WORDS_PER_LINE); wordIndex++) {
-                        JSONObject rawWord = words.optJSONObject(wordIndex);
-                        if (rawWord == null) continue;
-                        LyricsData.Word word = new LyricsData.Word();
-                        word.text = LyricsData.clean(rawWord.optString("text", ""),
-                                LyricsData.MAX_TEXT_LENGTH);
-                        word.start = Math.max(0, rawWord.optLong("start", 0));
-                        word.end = Math.max(word.start, rawWord.optLong("end", word.start));
-                        if (!word.text.isEmpty()) line.words.add(word);
-                    }
-                }
-                payload.lines.add(line);
+                payload.lines.add(lineFromJson(rawLine));
             }
         }
-        return payload;
+        JSONObject context = json.optJSONObject("context");
+        if (context != null) {
+            String key = context.optString("trackKey", "");
+            JSONArray contextRows = context.optJSONArray("lines");
+            if (!key.isEmpty() && key.equals(payload.track.trackKey) && contextRows != null) {
+                contextTrackKey = key;
+                long delta = context.optLong("delta", 0);
+                contextDelta = delta == 0 ? LyricContextWindow.NO_MATCH : delta;
+                contextLines.clear();
+                for (int i = 0; i < Math.min(contextRows.length(), LyricsData.MAX_LINES); i++) {
+                    JSONObject rawLine = contextRows.optJSONObject(i);
+                    if (rawLine == null) continue;
+                    contextLines.add(lineFromJson(rawLine));
+                }
+            }
+        }
     }
 
     private static LyricsData.Track trackFromPlayback(Bundle playback) {

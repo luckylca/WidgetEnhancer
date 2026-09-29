@@ -190,6 +190,10 @@ public final class DiagnosticsActivity extends Activity {
                         + stateLine("歌曲匹配", "matched".equals(value(lyrics, "matchStatus")))
                         + line("歌词行数", Integer.toString(intValue(lyrics, "lineCount")),
                         intValue(lyrics, "lineCount") > 0)
+                        + line("整首歌词（在线补齐）",
+                        intValue(lyrics, "contextLineCount") > 0
+                                ? intValue(lyrics, "contextLineCount") + " 行" : "未获取",
+                        intValue(lyrics, "contextLineCount") > 0)
                         + line("最后收到歌词", lastLyricTime, !"暂无".equals(lastLyricTime))
                         + line("网易云 fallback",
                         bool(lyrics, "legacyFallback") ? "正在使用" : "未使用", true));

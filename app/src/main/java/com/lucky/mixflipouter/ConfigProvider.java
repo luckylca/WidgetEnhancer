@@ -37,6 +37,7 @@ public final class ConfigProvider extends ContentProvider {
         qsTileBridge = new QSTileBridgeStore(getContext());
         PlaybackArtworkStore.initialize(getContext());
         PlaybackStateStore.initialize(getContext());
+        OnlineLyricFetcher.initialize(getContext());
         initializeTorch();
         NotificationStateStore.requestRebindIfDisconnected(getContext());
         return true;
@@ -71,6 +72,10 @@ public final class ConfigProvider extends ContentProvider {
         if ("publish_superlyric_internal".equals(method)) {
             enforceOwnCaller();
             return publishLyrics(extras);
+        }
+        if ("publish_lyric_context_internal".equals(method)) {
+            enforceOwnCaller();
+            return lyricsProvider.publishContext(extras);
         }
         if ("stop_superlyric_internal".equals(method)) {
             enforceOwnCaller();

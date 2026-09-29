@@ -234,6 +234,8 @@ final class DiagnosticReport {
                         : lyrics.getString("match_status", "unavailable"))
                 .put("legacyFallback", lyrics != null && lyrics.getBoolean("legacy_fallback"))
                 .put("lineCount", lyrics == null ? 0 : lyrics.getInt("line_count", 0))
+                .put("contextLineCount", lyrics == null ? 0
+                        : lyrics.getInt("context_line_count", 0))
                 .put("publishedAtEpochMs", lyrics == null
                         ? 0 : lyrics.getLong("published_at", 0))
                 .put("superlyricInstalled", lyrics != null
