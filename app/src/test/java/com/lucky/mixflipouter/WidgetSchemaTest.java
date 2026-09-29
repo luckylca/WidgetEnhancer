@@ -279,21 +279,21 @@ public final class WidgetSchemaTest {
 
     @Test
     public void lyricTimelineResolvesCurrentAndUpcomingLines() {
-        ArrayList<LyricsStateStore.Line> lines = new ArrayList<>();
-        LyricsStateStore.Line first = new LyricsStateStore.Line();
+        List<LyricsData.Line> lines = new ArrayList<>();
+        LyricsData.Line first = new LyricsData.Line();
         first.start = 1_000;
-        LyricsStateStore.Line second = new LyricsStateStore.Line();
+        LyricsData.Line second = new LyricsData.Line();
         second.start = 3_500;
-        LyricsStateStore.Line third = new LyricsStateStore.Line();
+        LyricsData.Line third = new LyricsData.Line();
         third.start = 8_000;
         lines.add(first);
         lines.add(second);
         lines.add(third);
 
-        assertEquals(-1, LyricsStateStore.findLine(lines, 999));
-        assertEquals(0, LyricsStateStore.findLine(lines, 1_000));
-        assertEquals(1, LyricsStateStore.findLine(lines, 7_999));
-        assertEquals(2, LyricsStateStore.findLine(lines, 12_000));
+        assertEquals(-1, LyricLineResolver.resolve(lines, 999).currentIndex);
+        assertEquals(0, LyricLineResolver.resolve(lines, 1_000).currentIndex);
+        assertEquals(1, LyricLineResolver.resolve(lines, 7_999).currentIndex);
+        assertEquals(2, LyricLineResolver.resolve(lines, 12_000).currentIndex);
     }
 
     @Test

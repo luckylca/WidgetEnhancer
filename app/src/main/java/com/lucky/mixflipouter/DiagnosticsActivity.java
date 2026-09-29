@@ -149,7 +149,7 @@ public final class DiagnosticsActivity extends Activity {
                         + hookLine(hooks, "catalogue", "系统列表")
                         + hookLine(hooks, "runtime", "外屏运行时")
                         + hookLine(hooks, "live_refresh", "即时刷新")
-                        + hookLine(hooks, "lyrics", "网易云歌词适配")
+                        + hookLine(hooks, "lyrics", "歌词数据接入")
                         + hookLine(hooks, "qs", "高级磁贴适配"));
 
         JSONObject widgets = report.optJSONObject("widgets");
@@ -163,11 +163,36 @@ public final class DiagnosticsActivity extends Activity {
 
         JSONObject playback = report.optJSONObject("playback");
         JSONObject lyrics = report.optJSONObject("lyrics");
+        boolean superLyricInstalled = bool(lyrics, "superlyricInstalled");
+        boolean superLyricCompatible = bool(lyrics, "superlyricCompatible");
+        boolean superLyricReceiverRegistered = bool(lyrics, "superlyricReceiverRegistered");
+        String superLyricStatus = !superLyricInstalled ? "未安装"
+                : !superLyricCompatible ? "API 不兼容"
+                : superLyricReceiverRegistered ? "接收器已注册" : "未注册（按需连接）";
+        String source = sourceLabel(value(lyrics, "source"));
+        String lastLyricTime = formatTimestamp(longValue(lyrics, "publishedAtEpochMs"));
         addSection("媒体与歌词",
                 stateLine("活动媒体会话", bool(playback, "sessionAvailable"))
                         + stateLine("专辑封面", bool(playback, "artworkAvailable"))
-                        + stateLine("同步歌词", bool(lyrics, "available"))
-                        + line("歌词行数", Integer.toString(intValue(lyrics, "lineCount")), true));
+                        + line("SuperLyric", superLyricStatus,
+                        superLyricReceiverRegistered)
+                        + line("SuperLyric API", value(lyrics, "superlyricCompatibilityLabel"),
+                        superLyricCompatible)
+                        + line("服务状态", value(lyrics, "superlyricConnectionMessage"),
+                        superLyricReceiverRegistered)
+                        + line("当前播放器", value(playback, "sourcePackage"),
+                        bool(playback, "sessionAvailable"))
+                        + line("歌词来源", source, !source.isEmpty())
+                        + line("歌词发布者", value(lyrics, "publisher"),
+                        !value(lyrics, "publisher").isEmpty())
+                        + line("Lyric ID", value(lyrics, "lyricId"),
+                        !value(lyrics, "lyricId").isEmpty())
+                        + stateLine("歌曲匹配", "matched".equals(value(lyrics, "matchStatus")))
+                        + line("歌词行数", Integer.toString(intValue(lyrics, "lineCount")),
+                        intValue(lyrics, "lineCount") > 0)
+                        + line("最后收到歌词", lastLyricTime, !"暂无".equals(lastLyricTime))
+                        + line("网易云 fallback",
+                        bool(lyrics, "legacyFallback") ? "正在使用" : "未使用", true));
 
         JSONObject qs = report.optJSONObject("quickSettings");
         addSection("可选高级磁贴",
@@ -273,8 +298,24 @@ public final class DiagnosticsActivity extends Activity {
         return object == null ? 0 : object.optInt(key, 0);
     }
 
+    private static long longValue(JSONObject object, String key) {
+        return object == null ? 0 : object.optLong(key, 0);
+    }
+
     private static String value(JSONObject object, String key) {
         return object == null ? "" : object.optString(key, "");
+    }
+
+    private static String formatTimestamp(long timestamp) {
+        return timestamp <= 0 ? "暂无" : new SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
+                Locale.getDefault()).format(new Date(timestamp));
+    }
+
+    private static String sourceLabel(String source) {
+        if (LyricSourcePolicy.SUPERLYRIC.equals(source)) return "SuperLyric";
+        if ("netease-api".equals(source)) return "网易云在线 fallback";
+        if (source != null && source.startsWith("netease-")) return "网易云 Hook fallback";
+        return source == null ? "" : source;
     }
 
     private static String safeMessage(Throwable error) {

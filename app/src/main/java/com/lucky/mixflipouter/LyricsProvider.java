@@ -4,7 +4,9 @@ import android.os.Bundle;
 
 /** Player-independent contract for publishing and resolving synchronized lyric lines. */
 interface LyricsProvider {
-    Bundle publish(Bundle payload);
+    Bundle publish(Bundle payload, Bundle playback);
+
+    Bundle stop(Bundle payload);
 
     Bundle snapshot(Bundle playback);
 }

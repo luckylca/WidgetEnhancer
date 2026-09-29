@@ -28,14 +28,16 @@ WidgetEnhancer 将自定义小部件直接接入 HyperOS 原生外屏小部件�
 
 ### 音乐小部件
 
-显示当前正在播放的音乐，并提供歌词和媒体控制。
+**基于 Android MediaSession + SuperLyric 的多播放器音乐小部件**，显示当前播放信息、封面、进度和同步歌词。
 
-- 歌曲名称与歌手
-- 专辑封面
-- 当前歌词与下一句歌词
-- 播放状态
-- MediaSession 媒体控制
-- 网易云音乐同步歌词适配
+- MediaSession 提供歌曲标题、歌手、专辑、封面、播放进度和播放控制
+- SuperLyric 提供同步歌词、翻译、罗马音，以及部分播放器的逐字时间
+- 外屏显示上一句、当前句和下一句；原有歌词小部件布局保持不变
+- 网易云音乐保留现有 Hook 与在线歌词 fallback
+
+歌词可用性取决于播放器及 SuperLyric 的实际适配方式。SuperLyric 当前列出的播放器包括 LX Music、网易云音乐、QQ 音乐、酷狗音乐及概念版、酷我音乐、Spotify、Apple Music、汽水音乐、椒盐音乐、MusicFree 和 Poweramp 等；部分播放器仅在特定页面或歌词模式下能提供歌词。请以 [SuperLyric 支持列表](https://github.com/HChenX/SuperLyric) 为准。
+
+WidgetEnhancer 使用官方 SuperLyricApi 3.5 源码（固定到提交 `b7ad6e4`）在自己的应用进程中接收歌词，不会把每个音乐播放器加入本模块的 LSPosed 作用域。SuperLyric 不可用或未发布当前歌曲歌词时，网易云音乐继续使用现有 fallback。
 
 | 操作 | 功能 |
 | --- | --- |
@@ -120,12 +122,21 @@ com.miui.fliphome
 
 ```mermaid
 flowchart TD
-    A[WidgetEnhancer 配置应用] --> B[小部件配置与媒体数据]
-    B --> C[LSPosed Hook]
-    C --> D[com.miui.fliphome]
-    D --> E[HyperOS 原生小部件列表]
-    E --> F[添加 / 删除 / 排序 / 持久化]
-    F --> G[外屏自定义小部件]
+    A[任意播放器] --> B[Android MediaSession]
+    B --> C[PlaybackStateStore]
+    D[SuperLyric Binder] --> E[SuperLyricBridge]
+    E --> F[LyricsStateStore]
+    G[网易云 Hook / 在线 fallback] --> F
+    C --> H[ConfigProvider]
+    F --> H
+    H --> I[MediaWidgetView]
+    I --> J[MIX Flip 外屏]
+    K[WidgetEnhancer 配置应用] --> L[小部件配置与媒体数据]
+    L --> M[LSPosed Hook]
+    M --> N[com.miui.fliphome]
+    N --> O[HyperOS 原生小部件列表]
+    O --> P[添加 / 删除 / 排序 / 持久化]
+    P --> J
 ```
 
 因此，小部件的添加、删除、排序、页面管理和持久化会尽可能继续使用 HyperOS 原有逻辑，模块主要负责自定义小部件的数据、配置与显示内容。
@@ -168,7 +179,11 @@ com.miui.home
 com.netease.cloudmusic
 ```
 
-用于获取更完整的网易云音乐同步歌词数据。
+保留网易云歌词 Hook fallback。SuperLyric 自己负责播放器适配；WidgetEnhancer 不需要把 LX Music、QQ 音乐、Spotify 等作用域加入本模块。
+
+### 可选：SuperLyric
+
+安装并启用 [SuperLyric](https://github.com/HChenX/SuperLyric)，并按其说明配置需要适配的播放器。WidgetEnhancer 会在自身进程中注册 Binder 接收器、主动请求当前歌词，并自动重试暂不可用的服务。
 
 ### 可选：SystemUI
 
@@ -183,7 +198,7 @@ com.android.systemui
 1. 从 [Releases](https://github.com/luckylca/WidgetEnhancer/releases/latest) 下载并安装 APK。
 2. 在 LSPosed 中启用 WidgetEnhancer。
 3. 至少勾选 `com.miui.fliphome` 作用域；需要导入外屏缓存时同时勾选 `com.miui.home`，需要 AppWidget 免授权绑定时同时勾选 `android`。
-4. 根据需要勾选网易云音乐或 SystemUI。
+4. 根据需要勾选网易云音乐或 SystemUI；需要通用同步歌词时，另行安装并启用 SuperLyric。
 5. 重启手机。
 6. 打开 WidgetEnhancer 创建小部件。
 7. 进入「设置 → 外屏 → 小部件 → 自定义」添加小部件。

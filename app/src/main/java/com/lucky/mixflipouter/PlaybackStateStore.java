@@ -123,19 +123,43 @@ final class PlaybackStateStore implements PlaybackProvider {
                 return result;
             }
             try {
-                MediaController.TransportControls controls = controller.getTransportControls();
+                PlaybackState state = controller.getPlaybackState();
+                long supportedActions = state == null ? 0 : state.getActions();
+                long requiredAction;
                 if (ActionSpec.MEDIA_PLAY_PAUSE.equals(action)) {
-                    PlaybackState state = controller.getPlaybackState();
-                    if (state != null && state.getState() == PlaybackState.STATE_PLAYING) controls.pause();
-                    else controls.play();
+                    requiredAction = state != null
+                            && state.getState() == PlaybackState.STATE_PLAYING
+                            ? PlaybackState.ACTION_PAUSE : PlaybackState.ACTION_PLAY;
                 } else if (ActionSpec.MEDIA_PREVIOUS.equals(action)) {
-                    controls.skipToPrevious();
+                    requiredAction = PlaybackState.ACTION_SKIP_TO_PREVIOUS;
                 } else if (ActionSpec.MEDIA_NEXT.equals(action)) {
-                    controls.skipToNext();
+                    requiredAction = PlaybackState.ACTION_SKIP_TO_NEXT;
                 } else {
                     result.putBoolean("ok", false);
                     result.putString("message", "不支持的媒体动作");
                     return result;
+                }
+                if ((supportedActions & requiredAction) == 0) {
+                    if (ActionSpec.MEDIA_PLAY_PAUSE.equals(action)
+                            && (supportedActions & PlaybackState.ACTION_PLAY_PAUSE) != 0) {
+                        requiredAction = PlaybackState.ACTION_PLAY_PAUSE;
+                    } else {
+                        result.putBoolean("ok", false);
+                        result.putString("message", "当前播放器未声明支持此操作");
+                        return result;
+                    }
+                }
+                MediaController.TransportControls controls = controller.getTransportControls();
+                if (requiredAction == PlaybackState.ACTION_PAUSE
+                        || (requiredAction == PlaybackState.ACTION_PLAY_PAUSE
+                        && state != null && state.getState() == PlaybackState.STATE_PLAYING)) {
+                    controls.pause();
+                } else if (requiredAction == PlaybackState.ACTION_PLAY
+                        || requiredAction == PlaybackState.ACTION_PLAY_PAUSE) controls.play();
+                else if (requiredAction == PlaybackState.ACTION_SKIP_TO_PREVIOUS) {
+                    controls.skipToPrevious();
+                } else if (requiredAction == PlaybackState.ACTION_SKIP_TO_NEXT) {
+                    controls.skipToNext();
                 }
                 result.putBoolean("ok", true);
             } catch (Throwable error) {

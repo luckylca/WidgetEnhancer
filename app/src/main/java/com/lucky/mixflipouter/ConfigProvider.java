@@ -68,6 +68,14 @@ public final class ConfigProvider extends ContentProvider {
             else enforceNeteaseCaller();
             return publishLyrics(extras);
         }
+        if ("publish_superlyric_internal".equals(method)) {
+            enforceOwnCaller();
+            return publishLyrics(extras);
+        }
+        if ("stop_superlyric_internal".equals(method)) {
+            enforceOwnCaller();
+            return stopLyrics(extras);
+        }
         if ("report_lyrics_hook".equals(method) || "report_lyrics_hook_internal".equals(method)) {
             if ("report_lyrics_hook_internal".equals(method)) enforceOwnCaller();
             else enforceNeteaseCaller();
@@ -109,7 +117,14 @@ public final class ConfigProvider extends ContentProvider {
         if ("set_appwidget_id".equals(method)) return setAppWidgetId(arg, extras);
         if ("get_qs_tiles".equals(method)) return qsTileBridge.snapshot();
         if ("get_lyrics_state".equals(method)) {
-            return lyricsProvider.snapshot(PlaybackStateStore.provider().snapshot());
+            // Only a real FlipHome caller (the lyric widget polling) may bring up
+            // the SuperLyric bridge; in-process diagnostics must not connect.
+            if (Binder.getCallingUid() != android.os.Process.myUid()) {
+                SuperLyricBridge.ensureStarted(getContext());
+            }
+            Bundle result = lyricsProvider.snapshot(PlaybackStateStore.provider().snapshot());
+            result.putAll(SuperLyricBridge.status(getContext()));
+            return result;
         }
         if ("grant_media".equals(method)) {
             String packageName = extras == null ? null : extras.getString("package");
@@ -454,15 +469,27 @@ public final class ConfigProvider extends ContentProvider {
     }
 
     private Bundle publishLyrics(Bundle extras) {
-        Bundle result = lyricsProvider.publish(extras);
+        Bundle result = lyricsProvider.publish(extras, PlaybackStateStore.provider().snapshot());
         if (result.getBoolean("ok")) {
             getContext().getContentResolver().notifyChange(Contract.LYRICS_URI, null);
-            Bundle report = new Bundle();
-            report.putString("stage", "lyrics");
-            report.putBoolean("ok", true);
-            report.putString("message", "已接收网易云结构化歌词 · "
-                    + result.getInt("line_count", 0) + " 行");
-            saveHookReport(report);
+            if (!result.getBoolean("ignored_lower_priority")) {
+                Bundle report = new Bundle();
+                report.putString("stage", "lyrics");
+                report.putBoolean("ok", true);
+                String source = result.getString("source", extras == null
+                        ? "lyrics" : extras.getString("source", "lyrics"));
+                report.putString("message", "已接收 " + source + " 歌词 · "
+                        + result.getInt("line_count", 0) + " 行");
+                saveHookReport(report);
+            }
+        }
+        return result;
+    }
+
+    private Bundle stopLyrics(Bundle extras) {
+        Bundle result = lyricsProvider.stop(extras);
+        if (result.getBoolean("ok")) {
+            getContext().getContentResolver().notifyChange(Contract.LYRICS_URI, null);
         }
         return result;
     }

@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+repositories {
+    // Some local Gradle init scripts replace settings repositories; keep JitPack visible there too.
+    maven { url = uri('https://jitpack.io') }
+    maven { url = uri('https://api.xposed.info/') }
+}
+
 def localSigning = [:]
 def localSigningFile = new File(System.getProperty('user.home'), '.config/widgetenhancer/signing.env')
 if (localSigningFile.isFile()) {
@@ -88,6 +94,9 @@ gradle.taskGraph.whenReady { graph ->
 dependencies {
     compileOnly 'de.robv.android.xposed:api:82'
     implementation 'com.google.android.material:material:1.14.0'
+    // Pinned to the API revision SuperLyric 3.3 ships with; 3.5 adds parcel fields
+    // and a manager transaction the 3.3 service does not have.
+    implementation 'com.github.HChenX:SuperLyricApi:3.4'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
 }

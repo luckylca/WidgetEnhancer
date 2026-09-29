@@ -227,10 +227,33 @@ final class DiagnosticReport {
         return new JSONObject()
                 .put("providerAvailable", lyrics != null)
                 .put("available", available)
-                .put("source", available ? lyrics.getString("source", "") : "")
-                .put("lineCount", available ? lyrics.getInt("line_count", 0) : 0)
-                .put("publishedAtEpochMs", available
-                        ? lyrics.getLong("published_at", 0) : 0);
+                .put("source", lyrics == null ? "" : lyrics.getString("source", ""))
+                .put("publisher", lyrics == null ? "" : lyrics.getString("publisher", ""))
+                .put("lyricId", lyrics == null ? "" : lyrics.getString("lyric_id", ""))
+                .put("matchStatus", lyrics == null ? "unavailable"
+                        : lyrics.getString("match_status", "unavailable"))
+                .put("legacyFallback", lyrics != null && lyrics.getBoolean("legacy_fallback"))
+                .put("lineCount", lyrics == null ? 0 : lyrics.getInt("line_count", 0))
+                .put("publishedAtEpochMs", lyrics == null
+                        ? 0 : lyrics.getLong("published_at", 0))
+                .put("superlyricInstalled", lyrics != null
+                        && lyrics.getBoolean("superlyric_installed"))
+                .put("superlyricApiVersion", lyrics == null ? 0
+                        : lyrics.getInt("superlyric_api_version", 0))
+                .put("superlyricCompatible", lyrics != null
+                        && lyrics.getBoolean("superlyric_compatible"))
+                .put("superlyricCompatibilityLabel", lyrics == null ? ""
+                        : lyrics.getString("superlyric_compatibility_label", ""))
+                .put("superlyricApiAvailable", lyrics != null
+                        && lyrics.getBoolean("superlyric_api_available"))
+                .put("superlyricReceiverRegistered", lyrics != null
+                        && lyrics.getBoolean("superlyric_receiver_registered"))
+                .put("superlyricConnectionMessage", lyrics == null ? ""
+                        : lyrics.getString("superlyric_connection_message", ""))
+                .put("superlyricPublisher", lyrics == null ? ""
+                        : lyrics.getString("superlyric_publisher", ""))
+                .put("superlyricLastReceivedAtEpochMs", lyrics == null ? 0
+                        : lyrics.getLong("superlyric_last_received_at", 0));
     }
 
     private static JSONObject summarizeQuickSettings(Bundle qs) throws Exception {
