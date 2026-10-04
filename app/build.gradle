@@ -3,7 +3,9 @@ plugins {
 }
 
 repositories {
-    // Some local Gradle init scripts replace settings repositories; keep JitPack visible there too.
+    // Keep all runtime dependency repositories explicit so clean CI machines do not depend on local Gradle init scripts.
+    google()
+    mavenCentral()
     maven { url = uri('https://jitpack.io') }
     maven { url = uri('https://api.xposed.info/') }
 }
