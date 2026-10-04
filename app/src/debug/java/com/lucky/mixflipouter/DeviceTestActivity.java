@@ -28,8 +28,16 @@ public final class DeviceTestActivity extends Activity {
             "com.lucky.mixflipouter.debug.DUMP_DIAGNOSTICS";
     public static final String ACTION_MEDIA_PLAY_PAUSE =
             "com.lucky.mixflipouter.debug.MEDIA_PLAY_PAUSE";
+    public static final String ACTION_MEDIA_NEXT =
+            "com.lucky.mixflipouter.debug.MEDIA_NEXT";
+    public static final String ACTION_MEDIA_PREVIOUS =
+            "com.lucky.mixflipouter.debug.MEDIA_PREVIOUS";
     public static final String ACTION_DUMP_PLAYBACK =
             "com.lucky.mixflipouter.debug.DUMP_PLAYBACK";
+    public static final String ACTION_DUMP_COMPAT =
+            "com.lucky.mixflipouter.debug.DUMP_COMPAT";
+    public static final String ACTION_SET_COMPAT =
+            "com.lucky.mixflipouter.debug.SET_COMPAT";
     public static final String ACTION_OPEN_FIRST_EDITOR =
             "com.lucky.mixflipouter.debug.OPEN_FIRST_EDITOR";
     public static final String ACTION_OPEN_TYPE_EDITOR =
@@ -576,6 +584,31 @@ public final class DeviceTestActivity extends Activity {
             String action = getIntent().getAction();
             if (ACTION_DUMP_DIAGNOSTICS.equals(action)) {
                 result = DiagnosticReport.collect(this, new WidgetRepository(this));
+            } else if (ACTION_DUMP_COMPAT.equals(action)) {
+                android.content.SharedPreferences prefs = getSharedPreferences(
+                        Contract.PREFS, 0);
+                result.put("is_enabled", LyricsCompatBridge.isEnabled(this));
+                result.put("raw_pref", prefs.getBoolean(
+                        Contract.PREF_LYRICS_COMPAT_MODE, false));
+                result.put("pref_keys", prefs.getAll().keySet().toString());
+                result.put("pref_file", getApplicationContext().getFilesDir()
+                        .getParent() + "/shared_prefs/" + Contract.PREFS + ".xml");
+                Bundle lyricsState = getContentResolver().call(
+                        Contract.PROVIDER_URI, "get_lyrics_state", null, null);
+                result.put("provider_compat_flag", lyricsState == null
+                        ? "null" : lyricsState.getBoolean("compat_mode_enabled"));
+                if (lyricsState != null) {
+                    result.put("position", lyricsState.getLong("position", -1));
+                    result.put("source", lyricsState.getString("source", ""));
+                    result.put("previous", lyricsState.getString("previous", ""));
+                    result.put("current", lyricsState.getString("current", ""));
+                    result.put("next", lyricsState.getString("next", ""));
+                }
+            } else if (ACTION_SET_COMPAT.equals(action)) {
+                boolean enabled = getIntent().getBooleanExtra("enabled", true);
+                LyricsCompatBridge.setEnabled(this, enabled);
+                result.put("ok", true);
+                result.put("is_enabled", LyricsCompatBridge.isEnabled(this));
             } else if (ACTION_DUMP_PLAYBACK.equals(action)) {
                 Bundle value = PlaybackStateStore.provider().snapshot();
                 result.put("available", value.getBoolean("available"));
@@ -589,6 +622,14 @@ public final class DeviceTestActivity extends Activity {
                         PlaybackNotificationListener.watchdogRefreshCount());
                 result.put("watchdog_last_refresh_elapsed",
                         PlaybackNotificationListener.watchdogLastRefreshElapsed());
+            } else if (ACTION_MEDIA_PREVIOUS.equals(action)) {
+                Bundle value = PlaybackStateStore.provider().execute(ActionSpec.MEDIA_PREVIOUS);
+                result.put("ok", value.getBoolean("ok"));
+                result.put("message", value.getString("message", ""));
+            } else if (ACTION_MEDIA_NEXT.equals(action)) {
+                Bundle value = PlaybackStateStore.provider().execute(ActionSpec.MEDIA_NEXT);
+                result.put("ok", value.getBoolean("ok"));
+                result.put("message", value.getString("message", ""));
             } else if (ACTION_MEDIA_PLAY_PAUSE.equals(action)) {
                 Bundle value = PlaybackStateStore.provider().execute(ActionSpec.MEDIA_PLAY_PAUSE);
                 result.put("ok", value.getBoolean("ok"));

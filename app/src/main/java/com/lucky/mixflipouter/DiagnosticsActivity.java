@@ -178,6 +178,8 @@ public final class DiagnosticsActivity extends Activity {
                         superLyricReceiverRegistered)
                         + line("SuperLyric API", value(lyrics, "superlyricCompatibilityLabel"),
                         superLyricCompatible)
+                        + line("兼容模式", bool(lyrics, "compatModeEnabled") ? "已开启" : "未开启",
+                        bool(lyrics, "compatModeEnabled"))
                         + line("服务状态", value(lyrics, "superlyricConnectionMessage"),
                         superLyricReceiverRegistered)
                         + line("当前播放器", value(playback, "sourcePackage"),
@@ -185,8 +187,6 @@ public final class DiagnosticsActivity extends Activity {
                         + line("歌词来源", source, !source.isEmpty())
                         + line("歌词发布者", value(lyrics, "publisher"),
                         !value(lyrics, "publisher").isEmpty())
-                        + line("Lyric ID", value(lyrics, "lyricId"),
-                        !value(lyrics, "lyricId").isEmpty())
                         + stateLine("歌曲匹配", "matched".equals(value(lyrics, "matchStatus")))
                         + line("歌词行数", Integer.toString(intValue(lyrics, "lineCount")),
                         intValue(lyrics, "lineCount") > 0)
@@ -317,6 +317,7 @@ public final class DiagnosticsActivity extends Activity {
 
     private static String sourceLabel(String source) {
         if (LyricSourcePolicy.SUPERLYRIC.equals(source)) return "SuperLyric";
+        if (LyricSourcePolicy.COMPAT_SEARCH.equals(source)) return "在线搜索（兼容模式）";
         if ("netease-api".equals(source)) return "网易云在线 fallback";
         if (source != null && source.startsWith("netease-")) return "网易云 Hook fallback";
         return source == null ? "" : source;

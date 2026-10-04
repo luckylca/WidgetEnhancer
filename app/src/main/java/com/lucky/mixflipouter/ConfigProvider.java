@@ -127,8 +127,12 @@ public final class ConfigProvider extends ContentProvider {
             if (Binder.getCallingUid() != android.os.Process.myUid()) {
                 SuperLyricBridge.ensureStarted(getContext());
             }
-            Bundle result = lyricsProvider.snapshot(PlaybackStateStore.provider().snapshot());
+            Bundle playback = PlaybackStateStore.provider().snapshot();
+            Bundle result = lyricsProvider.snapshot(playback);
             result.putAll(SuperLyricBridge.status(getContext()));
+            boolean compatEnabled = LyricsCompatBridge.isEnabled(getContext());
+            if (compatEnabled) LyricsCompatBridge.maybeRequest(playback, result);
+            result.putBoolean("compat_mode_enabled", compatEnabled);
             return result;
         }
         if ("grant_media".equals(method)) {

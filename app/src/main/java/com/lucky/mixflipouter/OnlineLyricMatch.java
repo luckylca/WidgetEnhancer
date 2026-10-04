@@ -30,8 +30,20 @@ final class OnlineLyricMatch {
         if (candidate == null) return false;
         String wantedTitle = LyricsData.normalize(title);
         String candidateTitle = LyricsData.normalize(candidate.title);
-        if (wantedTitle.isEmpty() || candidateTitle.isEmpty()
-                || !wantedTitle.equals(candidateTitle)) return false;
+        if (wantedTitle.isEmpty() || candidateTitle.isEmpty()) return false;
+        if (!wantedTitle.equals(candidateTitle)) {
+            // Compat search is approximate by design: players and lyric sites
+            // decorate titles with bracketed suffixes (粤语版 / Live / 抖音热播).
+            // The core-title fallback only applies when at least one side is
+            // undecorated — two different editions (Remix vs 粤语版) must not
+            // collapse into a false match.
+            String wantedCore = LyricsData.normalize(stripBrackets(title));
+            String candidateCore = LyricsData.normalize(stripBrackets(candidate.title));
+            boolean oneSidePlain = wantedCore.equals(wantedTitle)
+                    || candidateCore.equals(candidateTitle);
+            if (wantedCore.isEmpty() || candidateCore.isEmpty()
+                    || !wantedCore.equals(candidateCore) || !oneSidePlain) return false;
+        }
         String wantedArtist = LyricsData.normalize(artist);
         String candidateArtist = LyricsData.normalize(candidate.artist);
         if (!wantedArtist.isEmpty() && !candidateArtist.isEmpty()
@@ -43,6 +55,26 @@ final class OnlineLyricMatch {
             if (Math.abs(durationMs - candidate.durationMs) > tolerance) return false;
         }
         return true;
+    }
+
+    /** Removes （…）/(…)/[…]/【…】 segments so edition suffixes never block a match. */
+    private static String stripBrackets(String value) {
+        if (value == null) return "";
+        StringBuilder out = new StringBuilder(value.length());
+        int depth = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char c = value.charAt(index);
+            if (c == '(' || c == '（' || c == '[' || c == '【' || c == '{') {
+                depth++;
+                continue;
+            }
+            if (c == ')' || c == '）' || c == ']' || c == '】' || c == '}') {
+                if (depth > 0) depth--;
+                continue;
+            }
+            if (depth == 0) out.append(c);
+        }
+        return out.toString();
     }
 
     /**

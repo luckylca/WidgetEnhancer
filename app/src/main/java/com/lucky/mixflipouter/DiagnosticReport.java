@@ -233,6 +233,8 @@ final class DiagnosticReport {
                 .put("matchStatus", lyrics == null ? "unavailable"
                         : lyrics.getString("match_status", "unavailable"))
                 .put("legacyFallback", lyrics != null && lyrics.getBoolean("legacy_fallback"))
+                .put("compatModeEnabled", lyrics != null
+                        && lyrics.getBoolean("compat_mode_enabled"))
                 .put("lineCount", lyrics == null ? 0 : lyrics.getInt("line_count", 0))
                 .put("contextLineCount", lyrics == null ? 0
                         : lyrics.getInt("context_line_count", 0))

@@ -82,6 +82,7 @@ public final class WidgetEditorActivity extends Activity {
     private FrameLayout previewHolder;
     private com.google.android.material.slider.Slider lyricSizeSlider;
     private TextView lyricSizeValue;
+    private MaterialSwitch compatModeSwitch;
     private TextView notificationFilterSummary;
     private MaterialButton notificationFilterAppsButton;
     private ScrollView scroll;
@@ -239,10 +240,57 @@ public final class WidgetEditorActivity extends Activity {
         section(root, "外屏预览");
         addLivePreview(root);
 
-        TextView lyricStatus = text("歌词来源：网易云音乐", 14,
+        final TextView lyricStatus = text(lyricSourceLabel(), 14,
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         lyricStatus.setPadding(0, dp(12), 0, 0);
         root.addView(lyricStatus);
+
+        section(root, "歌词设置");
+        TextView guide = text(
+                "首次使用配置一次即可：\n"
+                        + "1. 下载并安装 SuperLyric（3.3 版本）\n"
+                        + "2. 在 LSPosed 中启用 SuperLyric，勾选你的音乐 App，按提示重启\n"
+                        + "3. 在音乐 App 的设置里打开「状态栏歌词」\n"
+                        + "4. 播放音乐，外屏即可显示歌词\n\n"
+                        + "注意：仅支持 SuperLyric 3.3；歌词不显示时可点下方「查看诊断」。",
+                14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        guide.setLineSpacing(dp(3), 1f);
+        root.addView(guide, matchWrap());
+
+        LinearLayout lyricActions = horizontal();
+        LinearLayout.LayoutParams downloadParams = weighted();
+        lyricActions.addView(outlinedButton("下载 SuperLyric", v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/HChenX/SuperLyric/releases")));
+            } catch (Throwable error) {
+                Toast.makeText(this, "未找到可打开链接的应用", Toast.LENGTH_SHORT).show();
+            }
+        }), downloadParams);
+        LinearLayout.LayoutParams diagParams = weighted();
+        diagParams.setMarginStart(dp(8));
+        lyricActions.addView(outlinedButton("查看诊断",
+                v -> startActivity(new Intent(this, DiagnosticsActivity.class))), diagParams);
+        LinearLayout.LayoutParams actionsParams = matchWrap();
+        actionsParams.topMargin = dp(8);
+        root.addView(lyricActions, actionsParams);
+
+        section(root, "兼容模式");
+        compatModeSwitch = new MaterialSwitch(this);
+        compatModeSwitch.setText("免 SuperLyric 显示歌词（全客户端适配）");
+        compatModeSwitch.setChecked(LyricsCompatBridge.isEnabled(this));
+        compatModeSwitch.setOnCheckedChangeListener((button, checked) -> {
+            LyricsCompatBridge.setEnabled(this, checked);
+            lyricStatus.setText(lyricSourceLabel());
+        });
+        root.addView(compatModeSwitch, matchWrap());
+        TextView compatHint = text(
+                "不安装 SuperLyric 也能显示歌词：根据歌名、歌手和曲长在线搜索整首歌词，"
+                        + "再按播放进度匹配当前句，适用于任意音乐 App。\n"
+                        + "覆盖面和准确度略低于 SuperLyric；两者同时可用时 SuperLyric 自动优先。",
+                14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        compatHint.setLineSpacing(dp(3), 1f);
+        root.addView(compatHint, matchWrap());
 
         section(root, "歌词大小");
         lyricSizeValue = text("100%", 14,
@@ -261,8 +309,13 @@ public final class WidgetEditorActivity extends Activity {
         root.addView(lyricSizeSlider, matchWrap());
     }
 
-    private void scheduleLivePreviewRefresh() {
-        if (previewHolder == null) return;
+    private String lyricSourceLabel() {
+        return LyricsCompatBridge.isEnabled(this)
+                ? "歌词来源：SuperLyric 优先，兼容模式（在线搜索）兜底"
+                : "歌词来源：SuperLyric";
+    }
+
+    private void scheduleLivePreviewRefresh() {        if (previewHolder == null) return;
         previewHolder.removeCallbacks(livePreviewRefresh);
         previewHolder.postDelayed(livePreviewRefresh, 200L);
     }

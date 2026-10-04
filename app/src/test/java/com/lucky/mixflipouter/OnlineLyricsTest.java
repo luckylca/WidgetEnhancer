@@ -68,6 +68,34 @@ public final class OnlineLyricsTest {
         assertFalse(OnlineLyricMatch.looksCjk(null));
     }
 
+    // ---------------- Approximate title matching (compat mode) ----------------
+
+    @Test
+    public void bracketedEditionSuffixesStillMatchTheSameSong() {
+        // Player says plain title, site decorates with (烟嗓版) — same song.
+        assertTrue(OnlineLyricMatch.acceptable("背着风流泪", "文夫", 240_000,
+                candidate("背着风流泪 (烟嗓版)", "文夫子", 239_000)));
+        // Player decorates, site is plain.
+        assertTrue(OnlineLyricMatch.acceptable("情花已谢 (粤语版)", "司司", 200_000,
+                candidate("情花已谢", "司司", 201_000)));
+        // Full-width brackets too.
+        assertTrue(OnlineLyricMatch.acceptable("Song", "Artist", 180_000,
+                candidate("Song（抖音热播）", "Artist", 181_000)));
+    }
+
+    @Test
+    public void bracketStrippingNeverRescuesADifferentSong() {
+        // Different core title stays rejected.
+        assertFalse(OnlineLyricMatch.acceptable("情花已谢 (粤语版)", "司司", 200_000,
+                candidate("情花已谢 (Remix)", "司司", 200_000)));
+        // Same core title but a different artist stays rejected.
+        assertFalse(OnlineLyricMatch.acceptable("情花已谢 (粤语版)", "司司", 200_000,
+                candidate("情花已谢", "青墨", 200_000)));
+        // Duration tolerance still applies after stripping.
+        assertFalse(OnlineLyricMatch.acceptable("Song", "Artist", 180_000,
+                candidate("Song (Live)", "Artist", 260_000)));
+    }
+
     // ---------------- Timeline calibration & window ----------------
 
     @Test

@@ -52,6 +52,9 @@ final class OnlineLyricFetcher {
     private static String requestedTrackKey = "";
     private static String lastFailedTrackKey = "";
     private static long lastFailedAt;
+    private static String requestedCompatKey = "";
+    private static String lastFailedCompatKey = "";
+    private static long lastFailedCompatAt;
 
     static synchronized void initialize(Context value) {
         context = value == null ? null : value.getApplicationContext();
@@ -70,6 +73,26 @@ final class OnlineLyricFetcher {
         }
         LyricsData.Track snapshot = copy(track);
         EXECUTOR.execute(() -> fetchAndPublish(app, snapshot));
+    }
+
+    /**
+     * Compat mode: the online result IS the lyric source, so the full timeline
+     * is published as a primary payload (source compat-search) instead of a
+     * context overlay. Track metadata always comes from the MediaSession, the
+     * online candidate only contributes lines.
+     */
+    static void requestCompat(LyricsData.Track track) {
+        if (track == null || track.title.isEmpty() || track.trackKey.isEmpty()) return;
+        Context app;
+        synchronized (OnlineLyricFetcher.class) {
+            if (context == null || track.trackKey.equals(requestedCompatKey)) return;
+            if (track.trackKey.equals(lastFailedCompatKey)
+                    && System.currentTimeMillis() - lastFailedCompatAt < FAILURE_RETRY_MS) return;
+            requestedCompatKey = track.trackKey;
+            app = context;
+        }
+        LyricsData.Track snapshot = copy(track);
+        EXECUTOR.execute(() -> fetchAndPublishCompat(app, snapshot));
     }
 
     private static void fetchAndPublish(Context app, LyricsData.Track track) {
@@ -108,6 +131,50 @@ final class OnlineLyricFetcher {
             if (result == null || !result.getBoolean("ok")) allowRetry(track.trackKey);
         } catch (Throwable ignored) {
             allowRetry(track.trackKey);
+        }
+    }
+
+    private static void fetchAndPublishCompat(Context app, LyricsData.Track track) {
+        try {
+            OnlineLyricMatch.Candidate candidate = firstUsable(track, looksCjk(track));
+            if (candidate == null || candidate.syncedLyrics.isEmpty()) {
+                allowCompatRetry(track.trackKey);
+                return;
+            }
+            List<LrcParser.Line> parsed = LrcParser.parse(
+                    candidate.syncedLyrics, candidate.translation, candidate.romanization);
+            if (parsed.isEmpty() || !isCurrentCompatRequest(track.trackKey)) {
+                allowCompatRetry(track.trackKey);
+                return;
+            }
+            Bundle payload = new Bundle();
+            payload.putString("source", LyricSourcePolicy.COMPAT_SEARCH);
+            payload.putString("state", "playing");
+            payload.putString("publisher_package", track.publisherPackage);
+            payload.putString("lyric_id", "");
+            payload.putString("title", track.title);
+            payload.putString("artist", track.artist);
+            payload.putString("album", track.album);
+            payload.putString("media_id", track.mediaId);
+            payload.putLong("duration", track.duration);
+            payload.putLong("published_at", System.currentTimeMillis());
+            ArrayList<Bundle> lines = new ArrayList<>();
+            for (LrcParser.Line value : parsed) {
+                if (lines.size() >= LyricsData.MAX_LINES) break;
+                Bundle line = new Bundle();
+                line.putLong("start", value.start);
+                line.putLong("end", value.end);
+                line.putString("content", value.content);
+                line.putString("translation", value.translation);
+                line.putString("secondary", value.romanization);
+                lines.add(line);
+            }
+            payload.putParcelableArrayList("lines", lines);
+            Bundle result = app.getContentResolver().call(
+                    Contract.PROVIDER_URI, "publish_lyrics_internal", null, payload);
+            if (result == null || !result.getBoolean("ok")) allowCompatRetry(track.trackKey);
+        } catch (Throwable ignored) {
+            allowCompatRetry(track.trackKey);
         }
     }
 
@@ -300,6 +367,18 @@ final class OnlineLyricFetcher {
             requestedTrackKey = "";
             lastFailedTrackKey = trackKey;
             lastFailedAt = System.currentTimeMillis();
+        }
+    }
+
+    private static synchronized boolean isCurrentCompatRequest(String trackKey) {
+        return requestedCompatKey.equals(trackKey);
+    }
+
+    private static synchronized void allowCompatRetry(String trackKey) {
+        if (requestedCompatKey.equals(trackKey)) {
+            requestedCompatKey = "";
+            lastFailedCompatKey = trackKey;
+            lastFailedCompatAt = System.currentTimeMillis();
         }
     }
 

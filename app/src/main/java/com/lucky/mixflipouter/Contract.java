@@ -23,6 +23,7 @@ final class Contract {
     static final String DEFAULT_WIDGET_ID = "default";
     static final String RUNTIME_VIEW_TAG = "mixflip_custom_runtime_overlay";
     static final String PREFS = "outer_widget";
+    static final String PREF_LYRICS_COMPAT_MODE = "lyrics_compat_mode";
     static final String EXTRA_WIDGET_ID = "widget_id";
     static final String EXTRA_SYSTEM_WIDGET_PICK_REQUEST = "mixflip_widget_pick_request";
     static final String EXTRA_SYSTEM_WIDGET_PROVIDER = "mixflip_widget_provider";

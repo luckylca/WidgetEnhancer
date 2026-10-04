@@ -507,7 +507,7 @@ final class LyricsStateStore implements LyricsProvider {
     }
 
     private static boolean isLegacy(String source) {
-        return LyricSourcePolicy.priority(source) == 1 || LyricSourcePolicy.priority(source) == 2;
+        return source != null && source.startsWith("netease-");
     }
 
     private static Bundle unavailable(Bundle out, String message) {
