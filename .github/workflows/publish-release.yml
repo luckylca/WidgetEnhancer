@@ -8,6 +8,9 @@ on:
         required: false
         default: true
         type: boolean
+  push:
+    tags:
+      - '*-*'
 
 permissions:
   contents: write
@@ -61,13 +64,13 @@ jobs:
           echo "Verified release certificate SHA-256: $ACTUAL_CERT_SHA256"
 
       - name: Prepare APK
-        if: ${{ inputs.publish }}
+        if: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.9.0.apk
 
       - name: Publish GitHub Release
-        if: ${{ inputs.publish }}
+        if: ${{ github.event_name == 'push' || inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
