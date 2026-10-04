@@ -64,7 +64,7 @@ jobs:
         if: ${{ inputs.publish }}
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.8.4.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.9.0.apk
 
       - name: Publish GitHub Release
         if: ${{ inputs.publish }}
@@ -72,14 +72,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > /tmp/release-notes.md <<'EOF'
-          ## WidgetEnhancer 0.8.4
+          ## WidgetEnhancer 0.9.0
 
           为 Xiaomi MIX Flip 外屏提供自定义小部件能力的 LSPosed 模块。
 
           ### 主要更新
-          - 修复导入 MAML 小部件时的尺寸限制
-          - 不再强制要求包内存在 `widget_2x3`，会自动识别 `widget_AxB` 实际尺寸
-          - 支持导入尺寸超出 2×3 外屏网格的 MAML 包，并在外屏槽位内缩放显示
+          - 加入 SuperLyric 支持，可从更多音乐客户端获取同步歌词、翻译等信息
+          - 加入在线歌词搜索兼容模式：基于 MediaSession 的歌名、歌手和时长搜索整首歌词，理论上支持所有能正常提供 MediaSession 信息的音乐客户端
+          - 修复手机重启后自定义小部件需要再次进入小部件设置页面才能刷新的问题，首次解锁后会自动恢复注入
+          - 支持导入系统桌面已经缓存的 MAML 小部件，并提供预览选择
+          - 支持直接从系统桌面小部件面板选择并添加桌面小部件
 
           ### 签名
           延续 0.8.3 起启用的固定 Release 签名，可从 0.8.3 直接覆盖升级。
@@ -92,14 +94,16 @@ jobs:
           免授权小部件绑定：`android`
 
           可选：
+          - `com.miui.home`（导入系统桌面缓存的 MAML 小部件）
+          - `com.miui.personalassistant`（直接调用系统桌面小部件面板）
           - `com.netease.cloudmusic`
           - `com.android.systemui`
 
           安装后请在 LSPosed 中启用模块并重启设备。
           EOF
 
-          gh release create "23-0.8.4" \
-            "dist/WidgetEnhancer-0.8.4.apk" \
+          gh release create "24-0.9.0" \
+            "dist/WidgetEnhancer-0.9.0.apk" \
             --target "$GITHUB_SHA" \
-            --title "WidgetEnhancer 0.8.4" \
+            --title "WidgetEnhancer 0.9.0" \
             --notes-file /tmp/release-notes.md

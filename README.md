@@ -28,16 +28,19 @@ WidgetEnhancer 将自定义小部件直接接入 HyperOS 原生外屏小部件�
 
 ### 音乐小部件
 
-**基于 Android MediaSession + SuperLyric 的多播放器音乐小部件**，显示当前播放信息、封面、进度和同步歌词。
+**基于 Android MediaSession + SuperLyric + 在线歌词兼容模式的多播放器音乐小部件**，显示当前播放信息、封面、进度和同步歌词。
 
 - MediaSession 提供歌曲标题、歌手、专辑、封面、播放进度和播放控制
 - SuperLyric 提供同步歌词、翻译、罗马音，以及部分播放器的逐字时间
+- 在线歌词兼容模式可仅根据 MediaSession 的歌名、歌手和时长搜索整首歌词，不依赖 SuperLyric
 - 外屏显示上一句、当前句和下一句；原有歌词小部件布局保持不变
 - 网易云音乐保留现有 Hook 与在线歌词 fallback
 
-歌词可用性取决于播放器及 SuperLyric 的实际适配方式。SuperLyric 当前列出的播放器包括 LX Music、网易云音乐、QQ 音乐、酷狗音乐及概念版、酷我音乐、Spotify、Apple Music、汽水音乐、椒盐音乐、MusicFree 和 Poweramp 等；部分播放器仅在特定页面或歌词模式下能提供歌词。请以 [SuperLyric 支持列表](https://github.com/HChenX/SuperLyric) 为准。
+SuperLyric 可用时优先使用其同步歌词；未安装 SuperLyric、当前播放器未适配或暂时没有歌词时，可开启在线歌词兼容模式作为兜底。只要音乐客户端能够正常向 Android MediaSession 暴露歌曲信息，理论上都可以尝试匹配在线歌词，因此兼容范围不再局限于特定播放器。
 
-WidgetEnhancer 使用官方 SuperLyricApi 3.5 源码（固定到提交 `b7ad6e4`）在自己的应用进程中接收歌词，不会把每个音乐播放器加入本模块的 LSPosed 作用域。SuperLyric 不可用或未发布当前歌曲歌词时，网易云音乐继续使用现有 fallback。
+歌词可用性仍取决于歌曲元数据和在线歌词库的匹配质量。SuperLyric 当前列出的播放器包括 LX Music、网易云音乐、QQ 音乐、酷狗音乐及概念版、酷我音乐、Spotify、Apple Music、汽水音乐、椒盐音乐、MusicFree 和 Poweramp 等；部分播放器仅在特定页面或歌词模式下能提供歌词。请以 [SuperLyric 支持列表](https://github.com/HChenX/SuperLyric) 为准。
+
+WidgetEnhancer 使用官方 SuperLyricApi 源码在自己的应用进程中接收歌词，不会把每个音乐播放器加入本模块的 LSPosed 作用域。
 
 | 操作 | 功能 |
 | --- | --- |
@@ -83,6 +86,7 @@ WidgetEnhancer 使用官方 SuperLyricApi 3.5 源码（固定到提交 `b7ad6e4`
 - 点按槽位可调整尺寸、圆角或删除
 - 支持小部件自身点击和滚动交互
 - 首次使用时按系统提示完成 AppWidget 授权
+- 支持直接打开系统桌面小部件面板，选择后直接加入当前外屏布局
 
 ### ZIP / MAML 小部件
 
@@ -91,6 +95,7 @@ WidgetEnhancer 使用官方 SuperLyricApi 3.5 源码（固定到提交 `b7ad6e4`
 - 可作为系统原生 MAML 小部件导入
 - 也可加入 2 × 3 应用小部件页面进行混合布局
 - 由 FlipHome 原生 MAML 宿主渲染
+- 支持读取系统桌面已经缓存的 MAML 小部件，并通过预览图直接导入
 
 ### 小部件管理
 
@@ -126,7 +131,7 @@ flowchart TD
     B --> C[PlaybackStateStore]
     D[SuperLyric Binder] --> E[SuperLyricBridge]
     E --> F[LyricsStateStore]
-    G[网易云 Hook / 在线 fallback] --> F
+    G[网易云 Hook / 在线歌词兼容模式] --> F
     C --> H[ConfigProvider]
     F --> H
     H --> I[MediaWidgetView]
@@ -173,6 +178,14 @@ com.miui.home
 
 用于读取 `com.miui.home/files/maml/res/0/` 中已缓存的 MAML 小部件，并在编辑应用小部件格子时显示包内预览图供选择。
 
+### 可选：系统桌面小部件面板
+
+```text
+com.miui.personalassistant
+```
+
+用于直接打开 HyperOS 系统桌面的小部件选择面板，并把选中的 AppWidget / MAML 小部件回传到 WidgetEnhancer。
+
 ### 可选：网易云音乐
 
 ```text
@@ -197,8 +210,8 @@ com.android.systemui
 
 1. 从 [Releases](https://github.com/luckylca/WidgetEnhancer/releases/latest) 下载并安装 APK。
 2. 在 LSPosed 中启用 WidgetEnhancer。
-3. 至少勾选 `com.miui.fliphome` 作用域；需要导入外屏缓存时同时勾选 `com.miui.home`，需要 AppWidget 免授权绑定时同时勾选 `android`。
-4. 根据需要勾选网易云音乐或 SystemUI；需要通用同步歌词时，另行安装并启用 SuperLyric。
+3. 至少勾选 `com.miui.fliphome` 作用域；需要导入系统桌面缓存时同时勾选 `com.miui.home`，需要直接调用系统桌面小部件面板时勾选 `com.miui.personalassistant`，需要 AppWidget 免授权绑定时同时勾选 `android`。
+4. 根据需要勾选网易云音乐或 SystemUI；需要高质量通用同步歌词时可另行安装并启用 SuperLyric，也可以直接使用内置在线歌词兼容模式。
 5. 重启手机。
 6. 打开 WidgetEnhancer 创建小部件。
 7. 进入「设置 → 外屏 → 小部件 → 自定义」添加小部件。
