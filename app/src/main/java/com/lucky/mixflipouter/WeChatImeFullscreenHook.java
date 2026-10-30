@@ -1,5 +1,6 @@
 package com.lucky.mixflipouter;
 
+import android.app.Application;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.res.Configuration;
@@ -9,6 +10,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.view.View;
 import android.view.ViewGroup;
@@ -51,6 +53,9 @@ public final class WeChatImeFullscreenHook {
     private static final Pattern KEYBOARD_BUTTON_BOUNDS = Pattern.compile(
             "\\[(-?\\d+),\\s*(-?\\d+)\\]\\[(-?\\d+),\\s*(-?\\d+)\\]");
     private static volatile int compactKeyboardWidth;
+    private static volatile boolean scopeReporterInstalled;
+    private static volatile boolean scopeReported;
+    private static volatile boolean scopeReportPending;
 
     private static final Map<Window, Integer> ORIGINAL_CUTOUT_MODES =
             Collections.synchronizedMap(new WeakHashMap<>());
@@ -74,6 +79,7 @@ public final class WeChatImeFullscreenHook {
     static void install(XC_LoadPackage.LoadPackageParam param) {
         if (!"com.tencent.wetype".equals(param.packageName)) return;
         try {
+            installScopeReporter();
             XposedHelpers.findAndHookMethod(INJECTOR_CLASS, param.classLoader,
                     "isImeSupport", Context.class, new XC_MethodHook() {
                         @Override
@@ -88,6 +94,7 @@ public final class WeChatImeFullscreenHook {
                         protected void afterHookedMethod(MethodHookParam hook) {
                             InputMethodService service =
                                     (InputMethodService) hook.thisObject;
+                            reportWeChatScope(service);
                             Window window = null;
                             try {
                                 Dialog dialog = service.getWindow();
@@ -135,6 +142,59 @@ public final class WeChatImeFullscreenHook {
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat keyboard hook unavailable: " + error);
         }
+    }
+
+    private static void installScopeReporter() {
+        if (scopeReporterInstalled) return;
+        try {
+            XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            Object context = hook.args[0];
+                            if (context instanceof Context) {
+                                reportWeChatScope((Context) context);
+                            }
+                        }
+                    });
+            scopeReporterInstalled = true;
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: WeChat scope reporter hook unavailable: " + error);
+        }
+    }
+
+    /** A successful in-process callback proves LSPosed loaded this package scope. */
+    private static void reportWeChatScope(Context context) {
+        synchronized (WeChatImeFullscreenHook.class) {
+            if (scopeReported || scopeReportPending) return;
+            scopeReportPending = true;
+        }
+        Thread reporter = new Thread(() -> {
+            try {
+                long[] retryDelays = {0L, 500L, 1500L, 4000L};
+                for (long delay : retryDelays) {
+                    if (delay > 0) Thread.sleep(delay);
+                    try {
+                        Bundle result = context.getContentResolver().call(
+                                ImeScopeStatusProvider.URI, "report_scope", "wechat", null);
+                        if (result != null && result.getBoolean("accepted", false)) {
+                            scopeReported = true;
+                            XposedBridge.log("MixFlipCustom: WeChat IME scope active");
+                            return;
+                        }
+                    } catch (Throwable error) {
+                        XposedBridge.log("MixFlipCustom: WeChat scope report attempt failed: "
+                                + error);
+                    }
+                }
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+            } finally {
+                scopeReportPending = false;
+            }
+        }, "MixFlipWechatScope");
+        reporter.setDaemon(true);
+        reporter.start();
     }
 
     private static void configureEdgeToEdge(Window window, boolean compact) {

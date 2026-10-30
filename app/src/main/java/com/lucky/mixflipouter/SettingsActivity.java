@@ -131,7 +131,7 @@ public final class SettingsActivity extends Activity {
         body.addView(header, matchWrap());
 
         imeReplacementSummary = text(
-                "关闭时仍可正常唤起系统当前输入法。开启后折叠时使用微信输入法；外屏布局适配还需勾选 com.tencent.wetype。",
+                "关闭时仍可正常唤起系统当前输入法。开启后折叠时使用微信输入法。",
                 14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         imeReplacementSummary.setPadding(0, dp(5), 0, 0);
         body.addView(imeReplacementSummary, matchWrap());
@@ -146,10 +146,12 @@ public final class SettingsActivity extends Activity {
         // is opened, including after boot while the cover screen is already folded.
         getContentResolver().notifyChange(ImeScopeStatusProvider.URI, null);
         imeReplacementSwitch.setOnCheckedChangeListener(null);
-        imeReplacementSwitch.setChecked(ImeReplacementSettings.read(this));
+        boolean enabled = ImeReplacementSettings.read(this);
+        imeReplacementSwitch.setChecked(enabled);
         bindImeReplacementSwitch();
         if (imeReplacementSummary != null) {
-            imeReplacementSummary.setText("关闭时仍可正常唤起系统当前输入法。开启后折叠时使用微信输入法；外屏布局适配还需勾选 com.tencent.wetype。");
+            imeReplacementSummary.setText(buildImeReplacementSummary(
+                    enabled, getImeScopeStatus()));
         }
     }
 
@@ -160,12 +162,7 @@ public final class SettingsActivity extends Activity {
 
     private void setImeReplacementEnabled(boolean enabled) {
         if (enabled) {
-            Bundle scopeStatus = null;
-            try {
-                scopeStatus = getContentResolver().call(ImeScopeStatusProvider.URI,
-                        "get_scope_status", null, null);
-            } catch (Throwable ignored) {
-            }
+            Bundle scopeStatus = getImeScopeStatus();
             boolean systemScope = scopeStatus != null
                     && scopeStatus.getBoolean("system", false);
             if (!systemScope) {
@@ -173,8 +170,18 @@ public final class SettingsActivity extends Activity {
                 showImeScopeRequiredDialog();
                 return;
             }
+            boolean wechatScope = scopeStatus.getBoolean("wechat", false);
+            if (!wechatScope) {
+                resetImeReplacementSwitch(false);
+                showWechatScopeNotDetectedDialog();
+                return;
+            }
         }
 
+        saveImeReplacementEnabled(enabled);
+    }
+
+    private void saveImeReplacementEnabled(boolean enabled) {
         try {
             if (!ImeReplacementSettings.write(this, enabled)) {
                 resetImeReplacementSwitch(!enabled);
@@ -182,9 +189,8 @@ public final class SettingsActivity extends Activity {
                 return;
             }
             if (imeReplacementSummary != null) {
-                imeReplacementSummary.setText(enabled
-                        ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。外屏布局适配还需勾选 com.tencent.wetype。"
-                        : "已关闭：仍可正常唤起系统当前输入法。外屏布局适配还需勾选 com.tencent.wetype。");
+                imeReplacementSummary.setText(buildImeReplacementSummary(
+                        enabled, getImeScopeStatus()));
             }
             Toast.makeText(this, enabled ? "已开启外屏微信输入法" : "已关闭外屏微信输入法",
                     Toast.LENGTH_SHORT).show();
@@ -198,6 +204,31 @@ public final class SettingsActivity extends Activity {
         }
     }
 
+    private Bundle getImeScopeStatus() {
+        try {
+            return getContentResolver().call(ImeScopeStatusProvider.URI,
+                    "get_scope_status", null, null);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private String buildImeReplacementSummary(boolean enabled, Bundle scopeStatus) {
+        boolean systemScope = scopeStatus != null && scopeStatus.getBoolean("system", false);
+        boolean wechatScope = scopeStatus != null && scopeStatus.getBoolean("wechat", false);
+        String replacement = enabled
+                ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。"
+                : "已关闭：仍可正常唤起系统当前输入法。";
+        String system = systemScope ? "系统框架 Hook 已生效。"
+                : "尚未检测到系统框架 Hook。";
+        String wechat = wechatScope
+                ? "已在微信输入法进程中检测到模块。"
+                : "尚未收到微信输入法进程的模块回报；这不等于直接读取了 LSPosed 勾选状态。";
+        return replacement + "\n" + system + "外屏键盘布局适配：" + wechat
+                + "\n作用域需要：系统框架(system) 和微信输入法(com.tencent.wetype)。"
+                + "android 作用域无需勾选。";
+    }
+
     private void resetImeReplacementSwitch(boolean checked) {
         if (imeReplacementSwitch == null) return;
         imeReplacementSwitch.setOnCheckedChangeListener(null);
@@ -206,9 +237,8 @@ public final class SettingsActivity extends Activity {
     }
 
     private void showImeScopeRequiredDialog() {
-        String message = "未检测到 system（系统框架）Hook。"
-                + "请在 LSPosed 勾选 system、com.tencent.wetype 和 com.lucky.mixflipouter，"
-                + "重启后再试。旧版管理器没有 system 时请勾 android。";
+        String message = "未检测到“系统框架（system）”Hook。请在 LSPosed 勾选系统框架，然后重启手机。"
+                + "当前设备不需要勾选 android。";
         new MaterialAlertDialogBuilder(this)
                 .setTitle("先启用 LSPosed 作用域")
                 .setMessage(message)
@@ -217,10 +247,24 @@ public final class SettingsActivity extends Activity {
                 .show();
     }
 
+    private void showWechatScopeNotDetectedDialog() {
+        String message = "本次开机还没有从微信输入法进程收到模块已加载回报。"
+                + "这项检测确认模块是否实际进入 com.tencent.wetype 进程，不能直接读取 LSPosed 的勾选框。"
+                + "请确认该作用域已勾选，并启动一次微信输入法；微信输入法替换仍可工作，但外屏布局适配要等它加载模块后才生效。";
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("尚未检测到微信输入法适配")
+                .setMessage(message)
+                .setNegativeButton("取消", null)
+                .setNeutralButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
+                .setPositiveButton("仍然开启", (dialog, which) ->
+                        saveImeReplacementEnabled(true))
+                .show();
+    }
+
     private void showImePreferenceScopeDialog() {
         new MaterialAlertDialogBuilder(this)
-                .setTitle("需要本应用作用域")
-                .setMessage("LSPosed 尚未允许本模块共享输入法开关状态。请在本模块作用域中勾选 com.lucky.mixflipouter，然后重启手机。")
+                .setTitle("设置保存失败")
+                .setMessage("无法保存输入法切换设置。请重新打开本页重试；若问题仍在，请确认 LSPosed 中的系统框架（system）作用域已生效。")
                 .setNegativeButton("稍后", null)
                 .setPositiveButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
                 .show();

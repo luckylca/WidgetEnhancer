@@ -9,7 +9,7 @@ import android.os.Bundle;
 import android.os.Process;
 import android.provider.Settings;
 
-/** Receives the system_server scope-active beacon. */
+/** Receives scope-active beacons from the system server and WeChat IME process. */
 public final class ImeScopeStatusProvider extends ContentProvider {
     static final Uri URI = Uri.parse("content://com.lucky.mixflipouter.ime-scope");
     private static final String PREFS = "ime_scope_status";
@@ -23,8 +23,9 @@ public final class ImeScopeStatusProvider extends ContentProvider {
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
         if ("report_scope".equals(method)) {
-            reportScope(arg);
-            return Bundle.EMPTY;
+            Bundle result = new Bundle();
+            result.putBoolean("accepted", reportScope(arg));
+            return result;
         }
         if ("get_scope_status".equals(method)) {
             enforceOwnCaller();
@@ -33,6 +34,8 @@ public final class ImeScopeStatusProvider extends ContentProvider {
             Bundle result = new Bundle();
             result.putBoolean("system", bootCount >= 0
                     && prefs.getInt("system_boot", -1) == bootCount);
+            result.putBoolean("wechat", bootCount >= 0
+                    && prefs.getInt("wechat_boot", -1) == bootCount);
             return result;
         }
         if ("set_replacement_status".equals(method)) {
@@ -56,18 +59,32 @@ public final class ImeScopeStatusProvider extends ContentProvider {
         return super.call(method, arg, extras);
     }
 
-    private void reportScope(String scope) {
+    private boolean reportScope(String scope) {
         int callerUid = Binder.getCallingUid();
         if ("system".equals(scope)) {
             if (callerUid != Process.SYSTEM_UID) throw new SecurityException("system only");
+        } else if ("wechat".equals(scope)) {
+            String[] packages = getContext().getPackageManager().getPackagesForUid(callerUid);
+            boolean fromWeChat = false;
+            if (packages != null) {
+                for (String packageName : packages) {
+                    if ("com.tencent.wetype".equals(packageName)) {
+                        fromWeChat = true;
+                        break;
+                    }
+                }
+            }
+            if (!fromWeChat) throw new SecurityException("WeChat IME only");
         } else {
             throw new SecurityException("unknown scope");
         }
 
         int bootCount = currentBootCount();
-        if (bootCount < 0) return;
+        if (bootCount < 0) return false;
+        String key = "system".equals(scope) ? "system_boot" : "wechat_boot";
         statusPreferences().edit()
-                .putInt("system_boot", bootCount).apply();
+                .putInt(key, bootCount).commit();
+        return true;
     }
 
     private android.content.SharedPreferences statusPreferences() {
