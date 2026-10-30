@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
@@ -31,6 +32,8 @@ public final class SettingsActivity extends Activity {
     private WidgetRepository repository;
     private LinearLayout widgetList;
     private TextView countText;
+    private MaterialSwitch imeReplacementSwitch;
+    private TextView imeReplacementSummary;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -44,6 +47,7 @@ public final class SettingsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         renderWidgets();
+        renderImeReplacementSetting();
     }
 
     private View createContent() {
@@ -99,11 +103,144 @@ public final class SettingsActivity extends Activity {
         listParams.topMargin = dp(12);
         root.addView(widgetList, listParams);
 
+        TextView imeSection = text("外屏输入法", 21,
+                color(com.google.android.material.R.attr.colorOnSurface));
+        imeSection.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(imeSection, marginTop(dp(24)));
+        root.addView(createImeReplacementCard(), marginTop(dp(12)));
+
         FrameLayout.LayoutParams navigationParams = new FrameLayout.LayoutParams(
                 -1, dp(80), Gravity.BOTTOM);
         page.addView(AppNavigation.create(this, AppNavigation.WIDGETS), navigationParams);
 
         return page;
+    }
+
+    private View createImeReplacementCard() {
+        MaterialCardView card = card();
+        LinearLayout body = vertical(dp(14));
+        LinearLayout header = horizontal();
+        TextView title = text("微信输入法替换官方输入法", 17,
+                color(com.google.android.material.R.attr.colorOnSurface));
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        header.addView(title, weighted());
+
+        imeReplacementSwitch = new MaterialSwitch(this);
+        imeReplacementSwitch.setContentDescription("微信输入法替换官方输入法");
+        header.addView(imeReplacementSwitch, new LinearLayout.LayoutParams(-2, -2));
+        body.addView(header, matchWrap());
+
+        imeReplacementSummary = text(
+                "开启后，折叠使用微信输入法；展开时恢复原输入法。",
+                14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        imeReplacementSummary.setPadding(0, dp(5), 0, 0);
+        body.addView(imeReplacementSummary, matchWrap());
+        card.addView(body, new FrameLayout.LayoutParams(-1, -2));
+        bindImeReplacementSwitch();
+        return card;
+    }
+
+    private void renderImeReplacementSetting() {
+        if (imeReplacementSwitch == null) return;
+        imeReplacementSwitch.setOnCheckedChangeListener(null);
+        imeReplacementSwitch.setChecked(ImeReplacementSettings.read(this));
+        bindImeReplacementSwitch();
+        if (imeReplacementSummary != null) {
+            imeReplacementSummary.setText("开启后，折叠使用微信输入法；展开时恢复原输入法。");
+        }
+    }
+
+    private void bindImeReplacementSwitch() {
+        imeReplacementSwitch.setOnCheckedChangeListener((button, checked) ->
+                setImeReplacementEnabled(checked));
+    }
+
+    private void setImeReplacementEnabled(boolean enabled) {
+        if (enabled) {
+            Bundle scopeStatus = null;
+            try {
+                scopeStatus = getContentResolver().call(ImeScopeStatusProvider.URI,
+                        "get_scope_status", null, null);
+            } catch (Throwable ignored) {
+            }
+            boolean systemScope = scopeStatus != null
+                    && scopeStatus.getBoolean("android", false);
+            boolean wechatScope = scopeStatus != null
+                    && scopeStatus.getBoolean("com.tencent.wetype", false);
+            if (!systemScope || !wechatScope) {
+                resetImeReplacementSwitch(false);
+                showImeScopeRequiredDialog(systemScope, wechatScope);
+                return;
+            }
+        }
+
+        try {
+            if (!ImeReplacementSettings.write(this, enabled)) {
+                resetImeReplacementSwitch(!enabled);
+                Toast.makeText(this, "设置未能保存，请重试", Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (imeReplacementSummary != null) {
+                imeReplacementSummary.setText(enabled
+                        ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。"
+                        : "已关闭：外屏继续使用系统当前输入法。");
+            }
+            Toast.makeText(this, enabled ? "已开启外屏微信输入法" : "已关闭外屏微信输入法",
+                    Toast.LENGTH_SHORT).show();
+        } catch (SecurityException error) {
+            resetImeReplacementSwitch(!enabled);
+            showImePreferenceScopeDialog();
+        } catch (Throwable error) {
+            resetImeReplacementSwitch(!enabled);
+            Toast.makeText(this, "无法保存输入法设置：" + safeMessage(error),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void resetImeReplacementSwitch(boolean checked) {
+        if (imeReplacementSwitch == null) return;
+        imeReplacementSwitch.setOnCheckedChangeListener(null);
+        imeReplacementSwitch.setChecked(checked);
+        bindImeReplacementSwitch();
+    }
+
+    private void showImeScopeRequiredDialog(boolean systemScope, boolean wechatScope) {
+        StringBuilder missing = new StringBuilder();
+        if (!systemScope) missing.append("• android\n");
+        if (!wechatScope) missing.append("• com.tencent.wetype\n");
+        String message = "尚未检测到：\n" + missing
+                + "请在 LSPosed 勾选上述作用域和 com.lucky.mixflipouter。"
+                + "重启后打开一次微信输入法，再回来开启。";
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("先启用 LSPosed 作用域")
+                .setMessage(message)
+                .setNegativeButton("稍后", null)
+                .setPositiveButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
+                .show();
+    }
+
+    private void showImePreferenceScopeDialog() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("需要本应用作用域")
+                .setMessage("LSPosed 尚未允许本模块共享输入法开关状态。请在本模块作用域中勾选 com.lucky.mixflipouter，然后重启手机。")
+                .setNegativeButton("稍后", null)
+                .setPositiveButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
+                .show();
+    }
+
+    private void openLsposedManager() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage("org.lsposed.manager");
+        if (launch == null) {
+            launch = getPackageManager().getLaunchIntentForPackage("io.github.lsposed.manager");
+        }
+        if (launch != null) {
+            startActivity(launch);
+        } else {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+            Toast.makeText(this, "未找到 LSPosed 管理器，请手动打开并检查本模块作用域。",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private void renderWidgets() {

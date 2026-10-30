@@ -81,6 +81,11 @@
             android:grantUriPermissions="true"
             tools:ignore="ExportedContentProvider" />
 
+        <provider
+            android:name=".ImeScopeStatusProvider"
+            android:authorities="com.lucky.mixflipouter.ime-scope"
+            android:exported="true" />
+
         <service
             android:name=".PlaybackNotificationListener"
             android:exported="true"
