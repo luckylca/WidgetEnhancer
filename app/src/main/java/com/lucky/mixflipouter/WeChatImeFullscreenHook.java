@@ -9,7 +9,6 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.Handler;
 import android.view.View;
 import android.view.ViewGroup;
@@ -71,7 +70,6 @@ public final class WeChatImeFullscreenHook {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<ClassLoader, Boolean> WIDTH_HOOKED_LOADERS =
             Collections.synchronizedMap(new WeakHashMap<>());
-    private static volatile boolean scopeReported;
 
     static void install(XC_LoadPackage.LoadPackageParam param) {
         if (!"com.tencent.wetype".equals(param.packageName)) return;
@@ -90,7 +88,6 @@ public final class WeChatImeFullscreenHook {
                         protected void afterHookedMethod(MethodHookParam hook) {
                             InputMethodService service =
                                     (InputMethodService) hook.thisObject;
-                            reportWechatScope(service);
                             Window window = null;
                             try {
                                 Dialog dialog = service.getWindow();
@@ -138,23 +135,6 @@ public final class WeChatImeFullscreenHook {
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat keyboard hook unavailable: " + error);
         }
-    }
-
-    private static void reportWechatScope(Context context) {
-        if (scopeReported || context == null) return;
-        scopeReported = true;
-        Thread reporter = new Thread(() -> {
-            try {
-                Bundle result = context.getContentResolver().call(ImeScopeStatusProvider.URI,
-                        "report_scope", "com.tencent.wetype", null);
-                if (result == null) scopeReported = false;
-            } catch (Throwable error) {
-                scopeReported = false;
-                XposedBridge.log("MixFlipCustom: WeChat scope report failed: " + error);
-            }
-        }, "MixFlipWeChatImeScope");
-        reporter.setDaemon(true);
-        reporter.start();
     }
 
     private static void configureEdgeToEdge(Window window, boolean compact) {

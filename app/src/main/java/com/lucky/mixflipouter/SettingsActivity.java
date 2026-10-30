@@ -131,7 +131,7 @@ public final class SettingsActivity extends Activity {
         body.addView(header, matchWrap());
 
         imeReplacementSummary = text(
-                "开启后，折叠使用微信输入法；展开时恢复原输入法。",
+                "关闭时仍可正常唤起系统当前输入法。开启后折叠时使用微信输入法；外屏布局适配还需勾选 com.tencent.wetype。",
                 14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         imeReplacementSummary.setPadding(0, dp(5), 0, 0);
         body.addView(imeReplacementSummary, matchWrap());
@@ -146,7 +146,7 @@ public final class SettingsActivity extends Activity {
         imeReplacementSwitch.setChecked(ImeReplacementSettings.read(this));
         bindImeReplacementSwitch();
         if (imeReplacementSummary != null) {
-            imeReplacementSummary.setText("开启后，折叠使用微信输入法；展开时恢复原输入法。");
+            imeReplacementSummary.setText("关闭时仍可正常唤起系统当前输入法。开启后折叠时使用微信输入法；外屏布局适配还需勾选 com.tencent.wetype。");
         }
     }
 
@@ -164,12 +164,10 @@ public final class SettingsActivity extends Activity {
             } catch (Throwable ignored) {
             }
             boolean systemScope = scopeStatus != null
-                    && scopeStatus.getBoolean("android", false);
-            boolean wechatScope = scopeStatus != null
-                    && scopeStatus.getBoolean("com.tencent.wetype", false);
-            if (!systemScope || !wechatScope) {
+                    && scopeStatus.getBoolean("system", false);
+            if (!systemScope) {
                 resetImeReplacementSwitch(false);
-                showImeScopeRequiredDialog(systemScope, wechatScope);
+                showImeScopeRequiredDialog();
                 return;
             }
         }
@@ -182,8 +180,8 @@ public final class SettingsActivity extends Activity {
             }
             if (imeReplacementSummary != null) {
                 imeReplacementSummary.setText(enabled
-                        ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。"
-                        : "已关闭：外屏继续使用系统当前输入法。");
+                        ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。外屏布局适配还需勾选 com.tencent.wetype。"
+                        : "已关闭：仍可正常唤起系统当前输入法。外屏布局适配还需勾选 com.tencent.wetype。");
             }
             Toast.makeText(this, enabled ? "已开启外屏微信输入法" : "已关闭外屏微信输入法",
                     Toast.LENGTH_SHORT).show();
@@ -204,13 +202,10 @@ public final class SettingsActivity extends Activity {
         bindImeReplacementSwitch();
     }
 
-    private void showImeScopeRequiredDialog(boolean systemScope, boolean wechatScope) {
-        StringBuilder missing = new StringBuilder();
-        if (!systemScope) missing.append("• android\n");
-        if (!wechatScope) missing.append("• com.tencent.wetype\n");
-        String message = "尚未检测到：\n" + missing
-                + "请在 LSPosed 勾选上述作用域和 com.lucky.mixflipouter。"
-                + "重启后打开一次微信输入法，再回来开启。";
+    private void showImeScopeRequiredDialog() {
+        String message = "未检测到 system（系统框架）Hook。"
+                + "请在 LSPosed 勾选 system、com.tencent.wetype 和 com.lucky.mixflipouter，"
+                + "重启后再试。旧版管理器没有 system 时请勾 android。";
         new MaterialAlertDialogBuilder(this)
                 .setTitle("先启用 LSPosed 作用域")
                 .setMessage(message)

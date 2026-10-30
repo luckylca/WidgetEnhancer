@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="xposed_scope" translatable="false">
+        <item>system</item>
         <item>com.miui.fliphome</item>
         <item>com.miui.home</item>
         <item>com.miui.personalassistant</item>

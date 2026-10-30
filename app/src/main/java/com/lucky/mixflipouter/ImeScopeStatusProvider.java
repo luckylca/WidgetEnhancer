@@ -9,7 +9,7 @@ import android.os.Bundle;
 import android.os.Process;
 import android.provider.Settings;
 
-/** Receives scope-active beacons from the two hooked processes. */
+/** Receives the system_server scope-active beacon. */
 public final class ImeScopeStatusProvider extends ContentProvider {
     static final Uri URI = Uri.parse("content://com.lucky.mixflipouter.ime-scope");
     private static final String PREFS = "ime_scope_status";
@@ -31,10 +31,8 @@ public final class ImeScopeStatusProvider extends ContentProvider {
             android.content.SharedPreferences prefs = getContext()
                     .getSharedPreferences(PREFS, 0);
             Bundle result = new Bundle();
-            result.putBoolean("android", bootCount >= 0
-                    && prefs.getInt("android_boot", -1) == bootCount);
-            result.putBoolean("com.tencent.wetype", bootCount >= 0
-                    && prefs.getInt("wechat_boot", -1) == bootCount);
+            result.putBoolean("system", bootCount >= 0
+                    && prefs.getInt("system_boot", -1) == bootCount);
             return result;
         }
         return super.call(method, arg, extras);
@@ -42,29 +40,16 @@ public final class ImeScopeStatusProvider extends ContentProvider {
 
     private void reportScope(String scope) {
         int callerUid = Binder.getCallingUid();
-        if ("android".equals(scope)) {
+        if ("system".equals(scope)) {
             if (callerUid != Process.SYSTEM_UID) throw new SecurityException("system only");
-        } else if ("com.tencent.wetype".equals(scope)) {
-            String[] packages = getContext().getPackageManager().getPackagesForUid(callerUid);
-            boolean isWeChat = false;
-            if (packages != null) {
-                for (String packageName : packages) {
-                    if ("com.tencent.wetype".equals(packageName)) {
-                        isWeChat = true;
-                        break;
-                    }
-                }
-            }
-            if (!isWeChat) throw new SecurityException("WeChat IME only");
         } else {
             throw new SecurityException("unknown scope");
         }
 
         int bootCount = currentBootCount();
         if (bootCount < 0) return;
-        String key = "android".equals(scope) ? "android_boot" : "wechat_boot";
         getContext().getSharedPreferences(PREFS, 0).edit()
-                .putInt(key, bootCount).apply();
+                .putInt("system_boot", bootCount).apply();
     }
 
     private int currentBootCount() {

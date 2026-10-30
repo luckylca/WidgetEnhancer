@@ -178,9 +178,9 @@ com.miui.fliphome
 android
 ```
 
-用于在系统服务中仅为 `com.miui.fliphome` 放行 AppWidget 绑定权限，从而避免添加应用小部件时重复弹出系统授权确认。使用该功能时需要在 LSPosed 中勾选 `android` 作用域。
+用于在系统服务中仅为 `com.miui.fliphome` 放行 AppWidget 绑定权限，从而避免添加应用小部件时重复弹出系统授权确认。使用该功能时需要在新版 LSPosed 中勾选 `system` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。
 
-在应用「我的外屏」设置中开启「微信输入法替换官方输入法」后，HyperOS 会在折叠到外屏时选用微信输入法，并在展开时恢复之前保存的内屏输入法。还需在 LSPosed 中给本模块勾选 `android`、`com.tencent.wetype` 和 `com.lucky.mixflipouter` 作用域；应用检测不到前两个 Hook 已生效时会提示检查作用域。外屏会将微信输入法窗口扩展到镜头侧区域；展开后保留原来的内屏键盘布局。
+在应用「我的外屏」设置中开启「微信输入法替换官方输入法」后，HyperOS 会在折叠到外屏时选用微信输入法，并在展开时恢复之前保存的内屏输入法。还需在 LSPosed 中给本模块勾选 `system`、`com.tencent.wetype` 和 `com.lucky.mixflipouter` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。应用会在未检测到系统框架 Hook 生效时提示检查作用域；外屏键盘布局适配还需要 `com.tencent.wetype` 作用域。外屏会将微信输入法窗口扩展到镜头侧区域；展开后保留原来的内屏键盘布局。
 
 外屏输入法适配参考了 [MixFlipMod](https://github.com/parallelcc/MixFlipMod) 的机型思路，以及 [MIUI_IME_Unlock](https://github.com/RC1844/MIUI_IME_Unlock) 的全面屏键盘支持方式。
 

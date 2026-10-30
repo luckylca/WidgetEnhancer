@@ -67,7 +67,7 @@ public final class OuterScreenInputMethodHook {
                             try {
                                 Context context = (Context) XposedHelpers.getObjectField(
                                         hook.thisObject, "mContext");
-                                reportScope(context, "android");
+                                reportScope(context, "system");
                             } catch (Throwable error) {
                                 XposedBridge.log("MixFlipCustom: system scope report failed: "
                                         + error);
@@ -81,7 +81,7 @@ public final class OuterScreenInputMethodHook {
 
     private static void reportScope(Context context, String scope) {
         if (context == null) return;
-        if ("android".equals(scope)) {
+        if ("system".equals(scope)) {
             synchronized (OuterScreenInputMethodHook.class) {
                 if (systemScopeReported || systemScopeReportPending) return;
                 systemScopeReportPending = true;
@@ -92,16 +92,16 @@ public final class OuterScreenInputMethodHook {
                 ContentResolver resolver = context.getContentResolver();
                 Bundle result = resolver.call(ImeScopeStatusProvider.URI,
                         "report_scope", scope, null);
-                if (result == null) {
-                    XposedBridge.log("MixFlipCustom: scope report returned no result: " + scope);
-                } else if ("android".equals(scope)) {
+                if (result != null && "system".equals(scope)) {
                     systemScopeReported = true;
+                } else if (result == null) {
+                    XposedBridge.log("MixFlipCustom: scope report returned no result: " + scope);
                 }
             } catch (Throwable error) {
                 XposedBridge.log("MixFlipCustom: scope report failed for " + scope + ": "
                         + error);
             } finally {
-                if ("android".equals(scope)) {
+                if ("system".equals(scope)) {
                     systemScopeReportPending = false;
                 }
             }
@@ -117,7 +117,7 @@ public final class OuterScreenInputMethodHook {
             try {
                 Object value = XposedHelpers.getObjectField(arg, "mContext");
                 if (value instanceof Context) {
-                    reportScope((Context) value, "android");
+                    reportScope((Context) value, "system");
                     return;
                 }
             } catch (Throwable ignored) {
