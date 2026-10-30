@@ -4,6 +4,7 @@ import android.app.Application;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -51,6 +52,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         if (Contract.PERSONAL_ASSISTANT_PACKAGE.equals(param.packageName)) {
             SystemWidgetPickerHook.installAssistantPicker(param.classLoader);
+            return;
+        }
+        if (Contract.VOICE_ASSIST_PACKAGE.equals(param.packageName)) {
+            CourseScheduleHook.install(param);
             return;
         }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
@@ -406,7 +411,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 return;
                             }
                             prepareRuntimeHost(host);
-                            MediaWidgetView overlay = new MediaWidgetView(context, config);
+                            View overlay = WidgetTypeRegistry.COURSE_SCHEDULE.equals(
+                                    WidgetTypeRegistry.resolve(config))
+                                    ? new CourseScheduleWidgetView(context, config)
+                                    : new MediaWidgetView(context, config);
                             overlay.setTag(Contract.RUNTIME_VIEW_TAG);
                             host.addView(overlay, new FrameLayout.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,

@@ -16,6 +16,8 @@ import android.media.MediaMetadataRetriever;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 
 /** Builds the exact 440 x 720 artwork size used by FlipHome's official previews. */
@@ -158,6 +160,10 @@ final class PreviewRenderer {
             drawAppWidgetPreview(context, canvas, config);
             return;
         }
+        if (WidgetTypeRegistry.COURSE_SCHEDULE.equals(typeId)) {
+            drawCourseSchedulePreview(canvas);
+            return;
+        }
         Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
         accent.setColor(0xffff6900);
         canvas.drawCircle(WIDTH / 2f, 272, 76, accent);
@@ -198,6 +204,69 @@ final class PreviewRenderer {
         canvas.drawRoundRect(40, 636, 400, 642, 3, 3, progress);
         progress.setColor(Color.WHITE);
         canvas.drawRoundRect(40, 636, 165, 642, 3, 3, progress);
+    }
+
+    private static void drawCourseSchedulePreview(Canvas canvas) {
+        Paint card = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setColor(Color.WHITE);
+        text.setTextSize(40);
+        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        canvas.drawText("小爱课程表", 36, 59, text);
+        text.setColor(0xffc8cbd2);
+        text.setTextSize(25);
+        text.setTypeface(android.graphics.Typeface.create("sans-serif", 0));
+        canvas.drawText(new SimpleDateFormat("M月d日  EEEE", Locale.CHINA)
+                .format(new Date()), 38, 103, text);
+        text.setColor(0xff9be3d5);
+        text.setTextAlign(Paint.Align.RIGHT);
+        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        text.setTextSize(24);
+        canvas.drawText("第 6 周", WIDTH - 38, 103, text);
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setColor(0xfff4f4f6);
+        text.setTextSize(29);
+        canvas.drawText("今日课程", 38, 157, text);
+        text.setTextSize(22);
+        text.setColor(0xff9ea4af);
+        text.setTextAlign(Paint.Align.RIGHT);
+        canvas.drawText("3 门", WIDTH - 38, 157, text);
+        text.setTextAlign(Paint.Align.LEFT);
+
+        String[][] samples = {
+                {"高等数学", "第 1–2 节", "教学楼 A · 302"},
+                {"大学英语", "第 3–4 节", "外语楼 201"},
+                {"数据结构", "第 7–8 节", "实验楼 406"}
+        };
+        int[] accents = {0xff8bd5ca, 0xffffc777, 0xffc3a6ff};
+        float cardTop = 168;
+        float cardBottom = 662;
+        float gap = 10;
+        float cardHeight = (cardBottom - cardTop - gap * (samples.length - 1)) / samples.length;
+        for (int i = 0; i < samples.length; i++) {
+            float top = cardTop + i * (cardHeight + gap);
+            card.setColor(0xff1c2129);
+            canvas.drawRoundRect(26, top, WIDTH - 26, top + cardHeight, 22, 22, card);
+            card.setColor(accents[i]);
+            canvas.drawRoundRect(26, top + 20, 34, top + cardHeight - 20, 4, 4, card);
+            text.setColor(Color.WHITE);
+            text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+            text.setTextSize(46);
+            float centerY = top + cardHeight * 0.46f;
+            canvas.drawText(samples[i][0], 54, centerY, text);
+            text.setTextAlign(Paint.Align.RIGHT);
+            text.setColor(accents[i]);
+            text.setTextSize(25);
+            canvas.drawText(samples[i][1], WIDTH - 43, centerY, text);
+            text.setTextAlign(Paint.Align.LEFT);
+            text.setTypeface(android.graphics.Typeface.create("sans-serif", 0));
+            text.setColor(0xffc1c5ce);
+            text.setTextSize(27);
+            canvas.drawText(samples[i][2], 54, centerY + 47, text);
+        }
+        text.setColor(0xff858b96);
+        text.setTextSize(18);
+        canvas.drawText("课程数据来自手机小爱课程表", 38, 705, text);
     }
 
     private static void drawShortcutPreview(Context context, Canvas canvas, WidgetConfig config) {

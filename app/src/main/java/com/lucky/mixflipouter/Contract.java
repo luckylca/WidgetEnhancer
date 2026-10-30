@@ -7,6 +7,7 @@ final class Contract {
     static final String TARGET_PACKAGE = "com.miui.fliphome";
     static final String MAML_CACHE_PACKAGE = "com.miui.home";
     static final String PERSONAL_ASSISTANT_PACKAGE = "com.miui.personalassistant";
+    static final String VOICE_ASSIST_PACKAGE = "com.miui.voiceassist";
     static final String SYSTEM_UI_PACKAGE = "com.android.systemui";
     static final String NETEASE_PACKAGE = "com.netease.cloudmusic";
     static final String GALLERY_PACKAGE = "com.miui.gallery";

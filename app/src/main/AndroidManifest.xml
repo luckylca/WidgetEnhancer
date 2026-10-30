@@ -14,6 +14,7 @@
     <queries>
         <package android:name="com.miui.fliphome" />
         <package android:name="com.miui.home" />
+        <package android:name="com.miui.voiceassist" />
         <package android:name="com.netease.cloudmusic" />
         <package android:name="com.hchen.superlyric" />
         <package android:name="org.lsposed.manager" />
@@ -31,7 +32,7 @@
         android:theme="@style/AppTheme">
 
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="为小米 MIX Flip 外屏添加媒体、音乐和快捷功能小部件" />
+        <meta-data android:name="xposeddescription" android:value="为小米 MIX Flip 外屏添加媒体、音乐、小爱课程表和快捷功能小部件" />
         <meta-data android:name="xposedminversion" android:value="93" />
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
 

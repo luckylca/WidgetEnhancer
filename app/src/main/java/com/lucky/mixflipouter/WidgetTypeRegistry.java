@@ -13,6 +13,7 @@ final class WidgetTypeRegistry {
     static final String NOTIFICATIONS = "notifications";
     static final String APPWIDGET = "appwidget";
     static final String MAML = "maml";
+    static final String COURSE_SCHEDULE = "course_schedule";
 
     private static final List<Type> TYPES;
 
@@ -24,6 +25,7 @@ final class WidgetTypeRegistry {
         types.add(new Type(NOTIFICATIONS, "通知", "设置数量、应用白名单或黑名单，点击跳转，左滑删除"));
         types.add(new Type(APPWIDGET, "应用小部件", "添加手机应用、ZIP 包或外屏缓存小部件，自由组合尺寸"));
         types.add(new Type(MAML, "系统小部件", "导入 ZIP / 主题商店的小部件包"));
+        types.add(new Type(COURSE_SCHEDULE, "小爱课程表", "读取手机本地课程数据，清晰显示本周课程"));
         TYPES = Collections.unmodifiableList(types);
     }
 
@@ -88,6 +90,8 @@ final class WidgetTypeRegistry {
             buildAppWidgetLayout(config);
         } else if (MAML.equals(id)) {
             buildMamlLayout(config);
+        } else if (COURSE_SCHEDULE.equals(id)) {
+            buildCourseScheduleLayout(config);
         }
         config.syncLegacyActionsFromComponents();
         return config;
@@ -107,11 +111,19 @@ final class WidgetTypeRegistry {
             buildAppWidgetLayout(config);
         } else if (MAML.equals(config.typeId)) {
             buildMamlLayout(config);
+        } else if (COURSE_SCHEDULE.equals(config.typeId)) {
+            buildCourseScheduleLayout(config);
         }
         config.syncLegacyActionsFromComponents();
     }
 
     static void buildMamlLayout(WidgetConfig config) {
+        config.mediaType = "none";
+        config.mimeType = "application/octet-stream";
+        config.components.clear();
+    }
+
+    static void buildCourseScheduleLayout(WidgetConfig config) {
         config.mediaType = "none";
         config.mimeType = "application/octet-stream";
         config.components.clear();

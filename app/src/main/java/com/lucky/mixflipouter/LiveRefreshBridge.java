@@ -100,7 +100,10 @@ final class LiveRefreshBridge {
             WidgetConfig config = WidgetConfig.load(activeContext, tracked.widgetId);
             prepareRuntimeHost(host);
             if (config == null || !config.enabled) continue;
-            MediaWidgetView overlay = new MediaWidgetView(host.getContext(), config);
+            View overlay = WidgetTypeRegistry.COURSE_SCHEDULE.equals(
+                    WidgetTypeRegistry.resolve(config))
+                    ? new CourseScheduleWidgetView(host.getContext(), config)
+                    : new MediaWidgetView(host.getContext(), config);
             overlay.setTag(Contract.RUNTIME_VIEW_TAG);
             host.addView(overlay, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,

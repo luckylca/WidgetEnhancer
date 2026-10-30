@@ -73,6 +73,20 @@ public final class ConfigProvider extends ContentProvider {
             enforceOwnCaller();
             return publishLyrics(extras);
         }
+        if ("publish_course_schedule".equals(method)) {
+            enforceCourseScheduleCaller();
+            Bundle result = CourseScheduleStore.publish(getContext(), extras);
+            if (result.getBoolean("ok")) {
+                getContext().getContentResolver().notifyChange(Contract.PROVIDER_URI, null);
+                Bundle report = new Bundle();
+                report.putString("stage", "course_schedule");
+                report.putBoolean("ok", true);
+                report.putString("message", "已从手机小爱课程表同步 "
+                        + result.getInt("course_count", 0) + " 门课程");
+                saveHookReport(report);
+            }
+            return result;
+        }
         if ("publish_lyric_context_internal".equals(method)) {
             enforceOwnCaller();
             return lyricsProvider.publishContext(extras);
@@ -105,6 +119,12 @@ public final class ConfigProvider extends ContentProvider {
         enforceAllowedCaller();
         if ("get_config".equals(method) || "get_widget".equals(method)) {
             return getWidget(arg == null ? Contract.DEFAULT_WIDGET_ID : arg);
+        }
+        if ("get_course_schedule".equals(method)) {
+            WidgetConfig config = repository.get(arg == null ? Contract.DEFAULT_WIDGET_ID : arg);
+            if (config == null || !WidgetTypeRegistry.COURSE_SCHEDULE.equals(
+                    WidgetTypeRegistry.resolve(config))) return Bundle.EMPTY;
+            return CourseScheduleStore.snapshot(getContext());
         }
         if ("list_widgets".equals(method)) return listWidgets();
         if ("get_system_state".equals(method)) return getSystemState();
@@ -509,11 +529,24 @@ public final class ConfigProvider extends ContentProvider {
         }
     }
 
+    private void enforceCourseScheduleCaller() {
+        int uid = Binder.getCallingUid();
+        if (uid == android.os.Process.myUid()) return;
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        if (packages != null) {
+            for (String name : packages) {
+                if (Contract.VOICE_ASSIST_PACKAGE.equals(name)) return;
+            }
+        }
+        throw new SecurityException("Only the Xiaomi voice assistant may publish course data");
+    }
+
     private Bundle getHealth() {
         SharedPreferences p = prefs();
         Bundle out = new Bundle();
         for (String stage : new String[]{
-                "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs", "wallpaper"
+                "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs",
+                "wallpaper", "course_schedule"
         }) {
             out.putBoolean(stage + "_ok", p.getBoolean("hook_" + stage + "_ok", false));
             out.putString(stage + "_message", p.getString("hook_" + stage + "_message", "尚未收到上报"));

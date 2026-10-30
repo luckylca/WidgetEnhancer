@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -82,6 +83,7 @@ public final class WidgetEditorActivity extends Activity {
     private FrameLayout previewHolder;
     private com.google.android.material.slider.Slider lyricSizeSlider;
     private TextView lyricSizeValue;
+    private TextView scheduleStatus;
     private MaterialSwitch compatModeSwitch;
     private TextView notificationFilterSummary;
     private MaterialButton notificationFilterAppsButton;
@@ -179,6 +181,8 @@ public final class WidgetEditorActivity extends Activity {
             createAppWidgetEditor(root);
         } else if (WidgetTypeRegistry.MAML.equals(type.id)) {
             createMamlEditor(root);
+        } else if (WidgetTypeRegistry.COURSE_SCHEDULE.equals(type.id)) {
+            createCourseScheduleEditor(root);
         }
 
         MaterialButton save = button("保存", v -> saveValues());
@@ -583,6 +587,46 @@ public final class WidgetEditorActivity extends Activity {
                 color(com.google.android.material.R.attr.colorOnSurfaceVariant));
         hint.setPadding(0, dp(12), 0, 0);
         root.addView(hint);
+    }
+
+    private void createCourseScheduleEditor(LinearLayout root) {
+        section(root, "手机课程数据");
+        TextView hint = text("直接读取这台手机中小爱课程表的本地数据，不需要分享链接或手动输入。"
+                        + "首次使用前，请在小米小爱语音助手里打开一次课程表；同步后，预览会显示手机中的真实课程。",
+                14, color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        hint.setLineSpacing(dp(3), 1f);
+        root.addView(hint, matchWrap());
+        scheduleStatus = text("正在检查手机课程数据…", 13,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        scheduleStatus.setPadding(0, dp(8), 0, 0);
+        root.addView(scheduleStatus, matchWrap());
+        refreshCourseScheduleStatus();
+
+        section(root, "外屏预览");
+        addLivePreview(root);
+        renderLivePreview();
+    }
+
+    private void refreshCourseScheduleStatus() {
+        if (scheduleStatus == null) return;
+        try {
+            Bundle data = getContentResolver().call(Contract.PROVIDER_URI,
+                    "get_course_schedule", config.id, null);
+            if (data == null) {
+                scheduleStatus.setText("暂时无法读取课程状态，请稍后重试。");
+            } else if (data.getBoolean("has_data")) {
+                int count = CourseScheduleClient.fromJson(
+                        data.getString("courses_json", "[]")).size();
+                int week = data.getInt("current_week", 0);
+                scheduleStatus.setText("已从手机本地同步 " + count + " 门课程"
+                        + (week > 0 ? " · 第 " + week + " 周" : ""));
+            } else {
+                scheduleStatus.setText(data.getString("error",
+                        "请在手机小爱语音助手中打开一次课程表。"));
+            }
+        } catch (Throwable error) {
+            scheduleStatus.setText("小爱课程表数据尚未同步；请先在手机小爱语音助手中打开课程表。");
+        }
     }
 
     private void createAppWidgetEditor(LinearLayout root) {
@@ -1014,7 +1058,9 @@ public final class WidgetEditorActivity extends Activity {
     private void renderLivePreview() {
         if (previewHolder == null) return;
         previewHolder.removeAllViews();
-        MediaWidgetView preview = new MediaWidgetView(this, config, false);
+        View preview = WidgetTypeRegistry.COURSE_SCHEDULE.equals(type.id)
+                ? new CourseScheduleWidgetView(this, config, false)
+                : new MediaWidgetView(this, config, false);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(220), dp(360),
                 Gravity.CENTER);
         previewHolder.addView(preview, params);
