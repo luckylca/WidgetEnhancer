@@ -32,6 +32,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if ("android".equals(param.packageName)) {
             // system_server: silence AppWidget bind consent for FlipHome.
             AppWidgetBindHook.install(param.classLoader);
+            // HyperOS otherwise replaces the selected IME with Sogou on fold.
+            OuterScreenInputMethodHook.install(param.classLoader);
             return;
         }
         if (Contract.SYSTEM_UI_PACKAGE.equals(param.packageName)) {
@@ -56,6 +58,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         if (Contract.VOICE_ASSIST_PACKAGE.equals(param.packageName)) {
             CourseScheduleHook.install(param);
+            return;
+        }
+        if ("com.tencent.wetype".equals(param.packageName)) {
+            WeChatImeFullscreenHook.install(param);
             return;
         }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;

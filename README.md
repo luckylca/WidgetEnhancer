@@ -180,6 +180,10 @@ android
 
 用于在系统服务中仅为 `com.miui.fliphome` 放行 AppWidget 绑定权限，从而避免添加应用小部件时重复弹出系统授权确认。使用该功能时需要在 LSPosed 中勾选 `android` 作用域。
 
+同一作用域会让 HyperOS 在折叠到外屏时选用微信输入法，并在展开时恢复之前保存的内屏输入法。还需在 LSPosed 中给本模块勾选 `com.tencent.wetype` 作用域。外屏会将微信输入法窗口扩展到镜头侧区域；展开后保留原来的内屏键盘布局。
+
+外屏输入法适配参考了 [MixFlipMod](https://github.com/parallelcc/MixFlipMod) 的机型思路，以及 [MIUI_IME_Unlock](https://github.com/RC1844/MIUI_IME_Unlock) 的全面屏键盘支持方式。
+
 ### 可选：导入外屏缓存小部件
 
 ```text
