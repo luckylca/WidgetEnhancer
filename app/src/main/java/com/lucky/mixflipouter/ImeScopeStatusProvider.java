@@ -28,8 +28,7 @@ public final class ImeScopeStatusProvider extends ContentProvider {
         if ("get_scope_status".equals(method)) {
             enforceOwnCaller();
             int bootCount = currentBootCount();
-            android.content.SharedPreferences prefs = getContext()
-                    .getSharedPreferences(PREFS, 0);
+            android.content.SharedPreferences prefs = statusPreferences();
             Bundle result = new Bundle();
             result.putBoolean("system", bootCount >= 0
                     && prefs.getInt("system_boot", -1) == bootCount);
@@ -48,8 +47,13 @@ public final class ImeScopeStatusProvider extends ContentProvider {
 
         int bootCount = currentBootCount();
         if (bootCount < 0) return;
-        getContext().getSharedPreferences(PREFS, 0).edit()
+        statusPreferences().edit()
                 .putInt("system_boot", bootCount).apply();
+    }
+
+    private android.content.SharedPreferences statusPreferences() {
+        return getContext().createDeviceProtectedStorageContext()
+                .getSharedPreferences(PREFS, 0);
     }
 
     private int currentBootCount() {
