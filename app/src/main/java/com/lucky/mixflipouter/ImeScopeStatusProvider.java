@@ -13,6 +13,7 @@ import android.provider.Settings;
 public final class ImeScopeStatusProvider extends ContentProvider {
     static final Uri URI = Uri.parse("content://com.lucky.mixflipouter.ime-scope");
     private static final String PREFS = "ime_scope_status";
+    private static final String REPLACEMENT_ENABLED = "replace_with_wechat";
 
     @Override
     public boolean onCreate() {
@@ -32,6 +33,24 @@ public final class ImeScopeStatusProvider extends ContentProvider {
             Bundle result = new Bundle();
             result.putBoolean("system", bootCount >= 0
                     && prefs.getInt("system_boot", -1) == bootCount);
+            return result;
+        }
+        if ("set_replacement_status".equals(method)) {
+            enforceOwnCaller();
+            boolean enabled = extras != null && extras.getBoolean("enabled", false);
+            boolean saved = statusPreferences().edit()
+                    .putBoolean(REPLACEMENT_ENABLED, enabled).commit();
+            if (saved) getContext().getContentResolver().notifyChange(URI, null);
+            Bundle result = new Bundle();
+            result.putBoolean("saved", saved);
+            return result;
+        }
+        if ("get_replacement_status".equals(method)) {
+            enforceSystemOrOwnCaller();
+            android.content.SharedPreferences prefs = statusPreferences();
+            Bundle result = new Bundle();
+            result.putBoolean("configured", prefs.contains(REPLACEMENT_ENABLED));
+            result.putBoolean("enabled", prefs.getBoolean(REPLACEMENT_ENABLED, false));
             return result;
         }
         return super.call(method, arg, extras);
@@ -64,6 +83,13 @@ public final class ImeScopeStatusProvider extends ContentProvider {
     private void enforceOwnCaller() {
         if (Binder.getCallingUid() != Process.myUid()) {
             throw new SecurityException("module app only");
+        }
+    }
+
+    private void enforceSystemOrOwnCaller() {
+        int callerUid = Binder.getCallingUid();
+        if (callerUid != Process.SYSTEM_UID && callerUid != Process.myUid()) {
+            throw new SecurityException("system or module app only");
         }
     }
 

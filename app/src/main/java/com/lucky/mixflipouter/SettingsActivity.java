@@ -142,6 +142,9 @@ public final class SettingsActivity extends Activity {
 
     private void renderImeReplacementSetting() {
         if (imeReplacementSwitch == null) return;
+        // Recheck the stored preference in system_server when the settings page
+        // is opened, including after boot while the cover screen is already folded.
+        getContentResolver().notifyChange(ImeScopeStatusProvider.URI, null);
         imeReplacementSwitch.setOnCheckedChangeListener(null);
         imeReplacementSwitch.setChecked(ImeReplacementSettings.read(this));
         bindImeReplacementSwitch();
