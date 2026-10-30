@@ -225,8 +225,7 @@ public final class SettingsActivity extends Activity {
                 ? "已在微信输入法进程中检测到模块。"
                 : "尚未收到微信输入法进程的模块回报；这不等于直接读取了 LSPosed 勾选状态。";
         return replacement + "\n" + system + "外屏键盘布局适配：" + wechat
-                + "\n作用域需要：系统框架(system) 和微信输入法(com.tencent.wetype)。"
-                + "android 作用域无需勾选。";
+                + "\n作用域需要：系统框架(system) 和微信输入法(com.tencent.wetype)。";
     }
 
     private void resetImeReplacementSwitch(boolean checked) {
@@ -237,8 +236,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private void showImeScopeRequiredDialog() {
-        String message = "未检测到“系统框架（system）”Hook。请在 LSPosed 勾选系统框架，然后重启手机。"
-                + "当前设备不需要勾选 android。";
+        String message = "未检测到“系统框架（system）”Hook。请在 LSPosed 勾选系统框架，然后重启手机。";
         new MaterialAlertDialogBuilder(this)
                 .setTitle("先启用 LSPosed 作用域")
                 .setMessage(message)

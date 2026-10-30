@@ -160,6 +160,8 @@ flowchart TD
 
 当前主要适配 **Xiaomi MIX Flip（ruyi）+ HyperOS**。
 
+当前仓库版本为 **WidgetEnhancer 0.9.10（versionCode 34）**。外屏微信输入法布局已在 MIX Flip 实机上针对 **微信输入法 4.0.0（versionCode 58201）**适配并验证；其它微信输入法版本尚未逐一验证。
+
 由于不同 HyperOS 版本的内部实现可能存在差异，系统 OTA 后可能需要更新模块才能继续正常使用。
 
 ## LSPosed 作用域

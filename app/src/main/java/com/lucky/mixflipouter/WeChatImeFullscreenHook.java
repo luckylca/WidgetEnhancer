@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -21,6 +22,8 @@ import android.graphics.Insets;
 import android.widget.LinearLayout;
 import android.view.Gravity;
 import android.graphics.drawable.Drawable;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,6 +35,7 @@ import java.util.WeakHashMap;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.ref.WeakReference;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -44,6 +48,8 @@ public final class WeChatImeFullscreenHook {
             "android.inputmethodservice.InputMethodServiceInjector";
     private static final String KEYBOARD_VIEW_CLASS =
             "com.tencent.wetype.plugin.hld.keyboard.selfdraw.n";
+    private static final String KEYBOARD_BASE_VIEW_CLASS =
+            "com.tencent.wetype.plugin.hld.keyboard.AbstractC1942s";
     private static final String CANDIDATE_VIEW_CLASS =
             "com.tencent.wetype.plugin.hld.candidate.ImeCandidateView";
     private static final String SYMBOL_SCROLL_VIEW_CLASS =
@@ -65,6 +71,8 @@ public final class WeChatImeFullscreenHook {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, Float> ROOT_TRANSLATIONS =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<View, Float> SYMBOL_TRANSLATIONS =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, int[]> ORIGINAL_PADDING =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, ArcNotchDrawable> ARC_NOTCH_BACKGROUNDS =
@@ -74,6 +82,10 @@ public final class WeChatImeFullscreenHook {
     private static final Map<View, Integer> AVAILABLE_ROOT_HEIGHTS =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<ClassLoader, Boolean> WIDTH_HOOKED_LOADERS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<View, Boolean> LAYOUT_REFRESHERS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<View, Boolean> PENDING_ADAPTATIONS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
     static void install(XC_LoadPackage.LoadPackageParam param) {
@@ -117,7 +129,11 @@ public final class WeChatImeFullscreenHook {
                                 XposedBridge.log("MixFlipCustom: WeChat window setup failed: "
                                         + error);
                             }
-                            if (window != null) schedule(service, window.getDecorView(), 0);
+                            if (window != null) {
+                                View decor = window.getDecorView();
+                                installLayoutRefresher(service, decor);
+                                schedule(service, decor, 0);
+                            }
                         }
                     });
             XposedHelpers.findAndHookMethod(InputMethodService.class, "onUpdateSelection",
@@ -236,14 +252,50 @@ public final class WeChatImeFullscreenHook {
     }
 
     private static void schedule(InputMethodService service, View decor, int attempt) {
+        synchronized (PENDING_ADAPTATIONS) {
+            if (PENDING_ADAPTATIONS.containsKey(decor)) return;
+            PENDING_ADAPTATIONS.put(decor, true);
+        }
         new Handler(service.getMainLooper()).postDelayed(
-                () -> adapt(service, decor, attempt), 100L);
+                () -> {
+                    synchronized (PENDING_ADAPTATIONS) {
+                        PENDING_ADAPTATIONS.remove(decor);
+                    }
+                    adapt(service, decor, attempt);
+                }, 100L);
+    }
+
+    /** Re-run after WeChat swaps keyboard modes without changing editor selection. */
+    private static void installLayoutRefresher(InputMethodService service, View decor) {
+        synchronized (LAYOUT_REFRESHERS) {
+            if (LAYOUT_REFRESHERS.containsKey(decor)) return;
+            LAYOUT_REFRESHERS.put(decor, true);
+        }
+        ViewTreeObserver observer = decor.getViewTreeObserver();
+        if (!observer.isAlive()) return;
+        WeakReference<InputMethodService> serviceRef = new WeakReference<>(service);
+        WeakReference<View> decorRef = new WeakReference<>(decor);
+        observer.addOnGlobalLayoutListener(() -> {
+            InputMethodService currentService = serviceRef.get();
+            View currentDecor = decorRef.get();
+            if (currentService != null && currentDecor != null
+                    && isCompactCover(currentService)) {
+                schedule(currentService, currentDecor, 0);
+            }
+        });
     }
 
     private static void adapt(InputMethodService service, View decor, int attempt) {
         View keyboard = findKeyboard(decor);
         View candidate = findByClassName(decor, CANDIDATE_VIEW_CLASS);
         if (keyboard == null || candidate == null) {
+            if (attempt == 0) {
+                StringBuilder hierarchy = new StringBuilder();
+                appendViewHierarchy(decor, hierarchy, 0, new int[]{100});
+                XposedBridge.log("MixFlipCustom: WeChat view lookup missing keyboard="
+                        + (keyboard != null) + " candidate=" + (candidate != null)
+                        + " hierarchy=" + hierarchy);
+            }
             retry(service, decor, attempt, "keyboard or candidate panel not ready");
             return;
         }
@@ -269,6 +321,7 @@ public final class WeChatImeFullscreenHook {
             }
             centerKeyboardContent(keyboard);
             fitVisiblePunctuationRows(keyboard);
+            centerSymbolKeyboardPages(keyboard);
             keyboard.invalidate();
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat cover layout failed: " + error);
@@ -492,6 +545,31 @@ public final class WeChatImeFullscreenHook {
         if (keyboardHost != null) restoreHeight(keyboardHost);
         restoreHeight(keyboard);
 
+        View symbolView = findByClassName(keyboard, SYMBOL_SCROLL_VIEW_CLASS);
+        if (symbolView != null) {
+            try {
+                Object recycler = XposedHelpers.callMethod(symbolView, "getScrollContainerRv");
+                if (recycler instanceof View) {
+                    View symbolGrid = (View) recycler;
+                    Float originalTranslation = SYMBOL_TRANSLATIONS.remove(symbolGrid);
+                    if (originalTranslation != null) {
+                        symbolGrid.setTranslationX(originalTranslation);
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Some keyboard modes have no symbol grid attached.
+            }
+        }
+        View symbolPager = findByClassName(keyboard,
+                "com.tencent.wetype.plugin.hld.symbol.ImeSymbolPagerView");
+        if (symbolPager instanceof ViewGroup) {
+            ViewGroup pages = (ViewGroup) symbolPager;
+            for (int index = 0; index < pages.getChildCount(); index++) {
+                Float original = SYMBOL_TRANSLATIONS.remove(pages.getChildAt(index));
+                if (original != null) pages.getChildAt(index).setTranslationX(original);
+            }
+        }
+
         for (View node = keyboard; node != null; node = node.getParent() instanceof View
                 ? (View) node.getParent() : null) {
             int[] padding = ORIGINAL_PADDING.remove(node);
@@ -556,14 +634,14 @@ public final class WeChatImeFullscreenHook {
         Object config = XposedHelpers.callMethod(data, "getConfig");
         configureKeyboardData(config, baseline, scale);
         clearIndependentWidthScaleCache(keyboard);
-        XposedHelpers.callMethod(keyboard, "O1", data);
+        updateKeyboardData(keyboard, data);
         float fillScale = getBottomFillScale(keyboard);
         if (Math.abs(fillScale - 1.0f) > 0.01f) {
             data = XposedHelpers.callMethod(baseline.data, "deepCopy");
             config = XposedHelpers.callMethod(data, "getConfig");
             configureKeyboardData(config, baseline, scale * fillScale);
             clearIndependentWidthScaleCache(keyboard);
-            XposedHelpers.callMethod(keyboard, "O1", data);
+            updateKeyboardData(keyboard, data);
         }
         baseline.appliedScale = scale;
         baseline.appliedWidth = availableWidth;
@@ -573,17 +651,9 @@ public final class WeChatImeFullscreenHook {
     private static void centerKeyboardContent(View keyboard) throws Throwable {
         KeyboardBaseline baseline = KEYBOARD_BASELINES.get(keyboard);
         if (baseline == null || keyboard.getWidth() <= 0) return;
-        String tree = String.valueOf(XposedHelpers.callMethod(keyboard,
-                "getKeyboardViewTree"));
-        Matcher matcher = KEYBOARD_BUTTON_BOUNDS.matcher(tree);
-        int left = Integer.MAX_VALUE;
-        int right = Integer.MIN_VALUE;
-        while (matcher.find()) {
-            left = Math.min(left, Integer.parseInt(matcher.group(1)));
-            right = Math.max(right, Integer.parseInt(matcher.group(3)));
-        }
-        if (left == Integer.MAX_VALUE || right <= left) return;
-        float offset = (keyboard.getWidth() - (right - left)) / 2.0f;
+        Rect bounds = getKeyboardButtonBounds(keyboard);
+        if (bounds == null || bounds.width() <= 0) return;
+        float offset = (keyboard.getWidth() - bounds.width()) / 2.0f - bounds.left;
         float targetTranslation = baseline.translationX + offset;
         if (Math.abs(keyboard.getTranslationX() - targetTranslation) > 0.5f) {
             keyboard.setTranslationX(targetTranslation);
@@ -592,7 +662,8 @@ public final class WeChatImeFullscreenHook {
 
     private static void fitVisiblePunctuationRows(View keyboard) throws Throwable {
         View symbolView = findByClassName(keyboard, SYMBOL_SCROLL_VIEW_CLASS);
-        if (symbolView == null || symbolView.getHeight() <= 0) return;
+        if (symbolView == null) return;
+        if (symbolView.getHeight() <= 0) return;
 
         Object recycler = XposedHelpers.callMethod(symbolView, "getScrollContainerRv");
         if (!(recycler instanceof ViewGroup)) return;
@@ -602,26 +673,90 @@ public final class WeChatImeFullscreenHook {
 
         Object adapter = XposedHelpers.callMethod(symbolView, "getAdapter");
         Object data = XposedHelpers.callMethod(adapter, "getDataList");
-        if (!(data instanceof List) || ((List<?>) data).isEmpty()
-                || !(((List<?>) data).get(0) instanceof String)) return;
+        if (data instanceof List && !((List<?>) data).isEmpty()
+                && ((List<?>) data).get(0) instanceof String) {
+            // The native list uses a fixed 68dp item height, which clips its fourth
+            // punctuation row on the shorter cover-screen keyboard.
+            int itemHeight = Math.max(1, availableHeight / 4);
+            XposedHelpers.callMethod(adapter, "k", itemHeight);
 
-        // The native list uses a fixed 68dp item height, which clips its fourth
-        // punctuation row on the shorter cover-screen keyboard.
-        int itemHeight = Math.max(1, availableHeight / 4);
-        XposedHelpers.callMethod(adapter, "k", itemHeight);
+            boolean changed = false;
+            for (int index = 0; index < list.getChildCount(); index++) {
+                View item = list.getChildAt(index);
+                ViewGroup.LayoutParams params = item.getLayoutParams();
+                if (params != null && params.height != itemHeight) {
+                    params.height = itemHeight;
+                    item.setLayoutParams(params);
+                    changed = true;
+                }
+            }
+            if (changed) list.requestLayout();
+        }
+        centerSymbolGrid(keyboard, list);
+    }
 
-        boolean changed = false;
-        for (int index = 0; index < list.getChildCount(); index++) {
-            View item = list.getChildAt(index);
-            ViewGroup.LayoutParams params = item.getLayoutParams();
-            if (params != null && params.height != itemHeight) {
-                params.height = itemHeight;
-                item.setLayoutParams(params);
-                changed = true;
+    /** WeChat 4.0 renders the full symbol page in its own self-drawn keyboard view. */
+    private static void centerSymbolKeyboardPages(View keyboard) {
+        View pager = findByClassName(keyboard,
+                "com.tencent.wetype.plugin.hld.symbol.ImeSymbolPagerView");
+        if (!(pager instanceof ViewGroup)) return;
+        ViewGroup pages = (ViewGroup) pager;
+        int[] pagerLocation = new int[2];
+        pager.getLocationOnScreen(pagerLocation);
+        for (int index = 0; index < pages.getChildCount(); index++) {
+            View page = pages.getChildAt(index);
+            if (!"com.tencent.wetype.plugin.hld.symbol.ImeSymbolKeyboardView"
+                    .equals(page.getClass().getName()) || page.getWidth() <= 0) continue;
+            int[] pageLocation = new int[2];
+            page.getLocationOnScreen(pageLocation);
+            int visibleWidth = Math.min(pagerLocation[0] + pager.getWidth(),
+                    pageLocation[0] + page.getWidth())
+                    - Math.max(pagerLocation[0], pageLocation[0]);
+            if (visibleWidth < pager.getWidth() * 0.65f) continue;
+
+            Rect bounds = getKeyboardButtonBounds(page);
+            if (bounds == null || bounds.width() <= 0
+                    || bounds.width() > page.getWidth() * 1.05f) continue;
+            float originalTranslation = SYMBOL_TRANSLATIONS.computeIfAbsent(
+                    page, View::getTranslationX);
+            float targetTranslation = originalTranslation
+                    + (page.getWidth() - bounds.width()) / 2.0f - bounds.left;
+            if (Math.abs(page.getTranslationX() - targetTranslation) > 0.5f) {
+                page.setTranslationX(targetTranslation);
             }
         }
-        if (changed) {
-            list.requestLayout();
+    }
+
+    private static void centerSymbolGrid(View keyboard, ViewGroup list) {
+        if (keyboard.getWidth() <= 0 || list.getChildCount() == 0) return;
+        if (list.getWidth() < keyboard.getWidth() * 0.65f) {
+            Float originalTranslation = SYMBOL_TRANSLATIONS.remove(list);
+            if (originalTranslation != null) list.setTranslationX(originalTranslation);
+            return;
+        }
+        int[] keyboardLocation = new int[2];
+        keyboard.getLocationOnScreen(keyboardLocation);
+        int left = Integer.MAX_VALUE;
+        int right = Integer.MIN_VALUE;
+        for (int index = 0; index < list.getChildCount(); index++) {
+            View item = list.getChildAt(index);
+            if (item.getVisibility() != View.VISIBLE || item.getWidth() <= 0) continue;
+            int[] itemLocation = new int[2];
+            item.getLocationOnScreen(itemLocation);
+            left = Math.min(left, itemLocation[0]);
+            right = Math.max(right, itemLocation[0] + item.getWidth());
+        }
+        if (left == Integer.MAX_VALUE || right <= left) return;
+
+        float originalTranslation = SYMBOL_TRANSLATIONS.computeIfAbsent(
+                list, View::getTranslationX);
+        float appliedTranslation = list.getTranslationX() - originalTranslation;
+        float baseLeft = left - keyboardLocation[0] - appliedTranslation;
+        float contentWidth = right - left;
+        float targetTranslation = originalTranslation
+                + (keyboard.getWidth() - contentWidth) / 2.0f - baseLeft;
+        if (Math.abs(list.getTranslationX() - targetTranslation) > 0.5f) {
+            list.setTranslationX(targetTranslation);
         }
     }
 
@@ -640,17 +775,9 @@ public final class WeChatImeFullscreenHook {
 
     private static float getBottomFillScale(View keyboard) {
         try {
-            String tree = String.valueOf(XposedHelpers.callMethod(keyboard,
-                    "getKeyboardViewTree"));
-            Matcher matcher = KEYBOARD_BUTTON_BOUNDS.matcher(tree);
-            int lastButtonBottom = Integer.MIN_VALUE;
-            while (matcher.find()) {
-                lastButtonBottom = Math.max(lastButtonBottom,
-                        Integer.parseInt(matcher.group(4)));
-            }
-            int[] location = new int[2];
-            keyboard.getLocationOnScreen(location);
-            int usedHeight = lastButtonBottom - location[1];
+            Rect bounds = getKeyboardButtonBounds(keyboard);
+            if (bounds == null) return 1.0f;
+            int usedHeight = bounds.bottom;
             if (usedHeight <= 0 || usedHeight >= keyboard.getHeight()) return 1.0f;
             int bottomMargin = Math.round(11.0f
                     * keyboard.getResources().getDisplayMetrics().density);
@@ -659,6 +786,92 @@ public final class WeChatImeFullscreenHook {
         } catch (Throwable ignored) {
             return 1.0f;
         }
+    }
+
+    /** Read key bounds from either the legacy debug tree or WeChat 4.0 layout JSON. */
+    private static Rect getKeyboardButtonBounds(View keyboard) {
+        try {
+            String tree = String.valueOf(XposedHelpers.callMethod(keyboard,
+                    "getKeyboardViewTree"));
+            Matcher matcher = KEYBOARD_BUTTON_BOUNDS.matcher(tree);
+            int left = Integer.MAX_VALUE;
+            int top = Integer.MAX_VALUE;
+            int right = Integer.MIN_VALUE;
+            int bottom = Integer.MIN_VALUE;
+            while (matcher.find()) {
+                left = Math.min(left, Integer.parseInt(matcher.group(1)));
+                top = Math.min(top, Integer.parseInt(matcher.group(2)));
+                right = Math.max(right, Integer.parseInt(matcher.group(3)));
+                bottom = Math.max(bottom, Integer.parseInt(matcher.group(4)));
+            }
+            if (left != Integer.MAX_VALUE && right > left && bottom > top) {
+                int[] location = new int[2];
+                keyboard.getLocationOnScreen(location);
+                return new Rect(left - location[0], top - location[1],
+                        right - location[0], bottom - location[1]);
+            }
+        } catch (Throwable ignored) {
+            // WeChat 4.0 removed the legacy keyboard debug-tree method.
+        }
+
+        try {
+            String layout = String.valueOf(XposedHelpers.callMethod(keyboard,
+                    "getLayoutInfo"));
+            JSONArray keys = new JSONObject(layout).optJSONArray("keys");
+            if (keys == null) return null;
+            int left = Integer.MAX_VALUE;
+            int top = Integer.MAX_VALUE;
+            int right = Integer.MIN_VALUE;
+            int bottom = Integer.MIN_VALUE;
+            for (int index = 0; index < keys.length(); index++) {
+                JSONObject key = keys.optJSONObject(index);
+                JSONArray rect = key == null ? null : key.optJSONArray("drawRect");
+                if (rect == null || rect.length() < 4) continue;
+                left = Math.min(left, rect.optInt(0));
+                top = Math.min(top, rect.optInt(1));
+                right = Math.max(right, rect.optInt(2));
+                bottom = Math.max(bottom, rect.optInt(3));
+            }
+            if (left != Integer.MAX_VALUE && right > left && bottom > top) {
+                return new Rect(left, top, right, bottom);
+            }
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: WeChat keyboard geometry unavailable: " + error);
+        }
+        return null;
+    }
+
+    private static void updateKeyboardData(View keyboard, Object data) throws Throwable {
+        StringBuilder candidates = new StringBuilder();
+        for (Class<?> type = keyboard.getClass(); type != null; type = type.getSuperclass()) {
+            for (Method method : type.getDeclaredMethods()) {
+                if (method.getParameterTypes().length != 1) continue;
+                Class<?> parameter = method.getParameterTypes()[0];
+                if (!"KeyboardData".equals(parameter.getSimpleName())) continue;
+                candidates.append(method.getName()).append('(')
+                        .append(parameter.getName()).append('@')
+                        .append(System.identityHashCode(parameter.getClassLoader()))
+                        .append(", accepts=").append(parameter.isInstance(data)).append(");");
+                if (!parameter.isInstance(data)) continue;
+                method.setAccessible(true);
+                try {
+                    method.invoke(keyboard, data);
+                    return;
+                } catch (java.lang.reflect.InvocationTargetException error) {
+                    throw error.getCause() == null ? error : error.getCause();
+                }
+            }
+        }
+        StringBuilder hierarchy = new StringBuilder();
+        for (Class<?> type = keyboard.getClass(); type != null; type = type.getSuperclass()) {
+            if (hierarchy.length() > 0) hierarchy.append(" -> ");
+            hierarchy.append(type.getName()).append('@')
+                    .append(System.identityHashCode(type.getClassLoader()));
+        }
+        throw new NoSuchMethodException("WeChat keyboard data setter unavailable for "
+                + keyboard.getClass().getName() + " and " + data.getClass().getName()
+                + '@' + System.identityHashCode(data.getClass().getClassLoader())
+                + " candidates=" + candidates + " hierarchy=" + hierarchy);
     }
 
     private static void ensureNativeWidthHook(View keyboard) throws Throwable {
@@ -724,7 +937,7 @@ public final class WeChatImeFullscreenHook {
         compactKeyboardWidth = 0;
         try {
             Object data = XposedHelpers.callMethod(baseline.data, "deepCopy");
-            XposedHelpers.callMethod(keyboard, "O1", data);
+            updateKeyboardData(keyboard, data);
             keyboard.setTranslationX(baseline.translationX);
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat keyboard restore failed: " + error);
@@ -760,7 +973,11 @@ public final class WeChatImeFullscreenHook {
 
     private static View findKeyboard(View view) {
         for (Class<?> type = view.getClass(); type != null; type = type.getSuperclass()) {
-            if (KEYBOARD_VIEW_CLASS.equals(type.getName())) return view;
+            if (KEYBOARD_VIEW_CLASS.equals(type.getName())
+                    || KEYBOARD_BASE_VIEW_CLASS.equals(type.getName())) return view;
+            if (type.getName().startsWith("com.tencent.wetype.plugin.hld.keyboard.")
+                    && hasMethod(type, "getOriginData")
+                    && hasMethod(type, "getKeyboardType")) return view;
         }
         if (!(view instanceof ViewGroup)) return null;
         ViewGroup group = (ViewGroup) view;
@@ -769,6 +986,28 @@ public final class WeChatImeFullscreenHook {
             if (result != null) return result;
         }
         return null;
+    }
+
+    private static boolean hasMethod(Class<?> type, String name) {
+        for (Method method : type.getMethods()) {
+            if (name.equals(method.getName())) return true;
+        }
+        return false;
+    }
+
+    private static void appendViewHierarchy(View view, StringBuilder out, int depth,
+            int[] remaining) {
+        if (remaining[0] <= 0) return;
+        remaining[0]--;
+        if (out.length() > 0) out.append(';');
+        out.append(depth).append(':').append(view.getClass().getName())
+                .append('@').append(view.getWidth()).append('x').append(view.getHeight());
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                appendViewHierarchy(group.getChildAt(index), out, depth + 1, remaining);
+            }
+        }
     }
 
     private static View findByClassName(View root, String className) {
