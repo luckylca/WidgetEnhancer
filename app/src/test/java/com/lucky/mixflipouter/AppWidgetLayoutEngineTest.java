@@ -289,7 +289,9 @@ public final class AppWidgetLayoutEngineTest {
         assertTrue(WidgetTypeRegistry.get(WidgetTypeRegistry.NOTIFICATIONS) != null);
         assertTrue(WidgetTypeRegistry.get(WidgetTypeRegistry.APPWIDGET) != null);
         assertTrue(WidgetTypeRegistry.get(WidgetTypeRegistry.MAML) != null);
-        assertEquals(6, WidgetTypeRegistry.all().size());
+        assertEquals("course_schedule", WidgetTypeRegistry.COURSE_SCHEDULE);
+        assertTrue(WidgetTypeRegistry.get(WidgetTypeRegistry.COURSE_SCHEDULE) != null);
+        assertEquals(7, WidgetTypeRegistry.all().size());
     }
 
     @Test

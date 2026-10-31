@@ -63,50 +63,36 @@ jobs:
           test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
           echo "Verified release certificate SHA-256: $ACTUAL_CERT_SHA256"
 
+      - name: Determine release metadata
+        if: ${{ github.event_name == 'push' || inputs.publish }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_CODE="$(grep -m1 -E '^[[:space:]]*versionCode[[:space:]]+' app/build.gradle | awk '{print $2}')"
+          VERSION="$(grep -m1 -E '^[[:space:]]*versionName[[:space:]]+' app/build.gradle | cut -d "'" -f2)"
+          TAG="${VERSION_CODE}-${VERSION}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "$TAG" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Gradle version $TAG"
+            exit 1
+          fi
+          test -f "docs/releases/${VERSION}.md"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "ASSET=WidgetEnhancer-${VERSION}.apk" >> "$GITHUB_ENV"
+
       - name: Prepare APK
         if: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/WidgetEnhancer-0.9.0.apk
+          cp app/build/outputs/apk/release/app-release.apk "dist/$ASSET"
 
       - name: Publish GitHub Release
         if: ${{ github.event_name == 'push' || inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat > /tmp/release-notes.md <<'EOF'
-          ## WidgetEnhancer 0.9.0
-
-          为 Xiaomi MIX Flip 外屏提供自定义小部件能力的 LSPosed 模块。
-
-          ### 主要更新
-          - 加入 SuperLyric 支持，可从更多音乐客户端获取同步歌词、翻译等信息
-          - 加入在线歌词搜索兼容模式：基于 MediaSession 的歌名、歌手和时长搜索整首歌词，理论上支持所有能正常提供 MediaSession 信息的音乐客户端
-          - 修复手机重启后自定义小部件需要再次进入小部件设置页面才能刷新的问题，首次解锁后会自动恢复注入
-          - 支持导入系统桌面已经缓存的 MAML 小部件，并提供预览选择
-          - 支持直接从系统桌面小部件面板选择并添加桌面小部件
-
-          ### 签名
-          延续 0.8.3 起启用的固定 Release 签名，可从 0.8.3 直接覆盖升级。
-
-          正式签名证书 SHA-256：
-          `996d10e602eb6e0a1cd8a3853128d6ce4d4e456078d93eb2ce27e655d9f89215`
-
-          ### LSPosed 作用域
-          必选：`com.miui.fliphome`
-          免授权小部件绑定：`android`
-
-          可选：
-          - `com.miui.home`（导入系统桌面缓存的 MAML 小部件）
-          - `com.miui.personalassistant`（直接调用系统桌面小部件面板）
-          - `com.netease.cloudmusic`
-          - `com.android.systemui`
-
-          安装后请在 LSPosed 中启用模块并重启设备。
-          EOF
-
-          gh release create "24-0.9.0" \
-            "dist/WidgetEnhancer-0.9.0.apk" \
+          gh release create "$TAG" \
+            "dist/$ASSET" \
             --target "$GITHUB_SHA" \
-            --title "WidgetEnhancer 0.9.0" \
-            --notes-file /tmp/release-notes.md
+            --title "WidgetEnhancer $VERSION" \
+            --notes-file "docs/releases/${VERSION}.md"
