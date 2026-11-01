@@ -51,8 +51,8 @@ android {
         applicationId 'com.lucky.mixflipouter'
         minSdk 30
         targetSdk 36
-        versionCode 34
-        versionName '0.9.10'
+        versionCode 35
+        versionName '0.9.11'
     }
 
     signingConfigs {

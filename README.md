@@ -160,7 +160,7 @@ flowchart TD
 
 当前主要适配 **Xiaomi MIX Flip（ruyi）+ HyperOS**。
 
-当前仓库版本为 **WidgetEnhancer 0.9.10（versionCode 34）**。外屏微信输入法布局已在 MIX Flip 实机上针对 **微信输入法 4.0.0（versionCode 58201）**适配并验证；其它微信输入法版本尚未逐一验证。
+当前仓库版本为 **WidgetEnhancer 0.9.11（versionCode 35）**。外屏微信输入法基础布局针对 **微信输入法 4.0.0（versionCode 58201）** 在 MIX Flip 实机适配并验证；本版新增九宫格宽度优化，仍需升级后在设备上复核，其它微信输入法版本尚未逐一验证。
 
 由于不同 HyperOS 版本的内部实现可能存在差异，系统 OTA 后可能需要更新模块才能继续正常使用。
 
@@ -182,7 +182,7 @@ android
 
 用于在系统服务中仅为 `com.miui.fliphome` 放行 AppWidget 绑定权限，从而避免添加应用小部件时重复弹出系统授权确认。使用该功能时需要在新版 LSPosed 中勾选 `system` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。
 
-在应用「我的外屏」设置中开启「微信输入法替换官方输入法」后，HyperOS 会在折叠到外屏时选用微信输入法，并在展开时恢复之前保存的内屏输入法。还需在 LSPosed 中给本模块勾选 `system`、`com.tencent.wetype` 和 `com.lucky.mixflipouter` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。应用会在未检测到系统框架 Hook 生效时提示检查作用域；外屏键盘布局适配还需要 `com.tencent.wetype` 作用域。外屏会将微信输入法窗口扩展到镜头侧区域；展开后保留原来的内屏键盘布局。
+在应用「我的外屏」设置中开启「微信输入法替换官方输入法」后，HyperOS 会在折叠到外屏时选用微信输入法，并在展开时恢复之前保存的内屏输入法。还需在 LSPosed 中给本模块勾选 `system`、`com.tencent.wetype` 和 `com.lucky.mixflipouter` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。设置开关现在允许在尚未收到作用域回报时先保存，状态区显示系统进程及微信输入法进程的实际回报；未收到回报不等于直接读取到 LSPosed 勾选状态，功能真正生效仍需正确启用作用域。外屏键盘布局适配还需要 `com.tencent.wetype` 作用域。外屏会将微信输入法窗口扩展到镜头侧区域，并针对九宫格键盘优化宽度；展开后保留原来的内屏键盘布局。
 
 外屏输入法适配参考了 [MixFlipMod](https://github.com/parallelcc/MixFlipMod) 的机型思路，以及 [MIUI_IME_Unlock](https://github.com/RC1844/MIUI_IME_Unlock) 的全面屏键盘支持方式。
 
