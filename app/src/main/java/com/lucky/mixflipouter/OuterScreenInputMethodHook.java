@@ -63,6 +63,7 @@ public final class OuterScreenInputMethodHook {
                     "onDisplayDeviceStateChanged", int.class, new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam hook) {
+                            reportSystemScopeFromService(new Object[]{hook.thisObject});
                             postSelectionSync(loader, hook.thisObject);
                         }
                     });
@@ -74,14 +75,9 @@ public final class OuterScreenInputMethodHook {
 
     private static void installScopeReporter(ClassLoader loader) {
         try {
-            XposedHelpers.findAndHookMethod(IMMS_IMPL, loader, "init",
-                    XposedHelpers.findClass(IMMS, loader), Handler.class,
-                    XposedHelpers.findClass(
-                            "com.android.server.inputmethod.UserDataRepository", loader),
-                    Context.class,
-                    XposedHelpers.findClass(
-                            "com.android.server.inputmethod.InputMethodMenuControllerNew", loader),
-                    new XC_MethodHook() {
+            Class<?> implClass = XposedHelpers.findClass(IMMS_IMPL, loader);
+            java.util.Set<?> hooks = XposedBridge.hookAllMethods(
+                    implClass, "init", new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam hook) {
                             if (scopeReporterInstalled) return;
@@ -107,6 +103,10 @@ public final class OuterScreenInputMethodHook {
                             }
                         }
                     });
+            if (hooks == null || hooks.isEmpty()) {
+                throw new NoSuchMethodError(IMMS_IMPL + ".init");
+            }
+            XposedBridge.log("MixFlipCustom: system scope reporter installed");
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: system scope reporter unavailable: " + error);
         }
@@ -122,13 +122,15 @@ public final class OuterScreenInputMethodHook {
         }
         Thread reporter = new Thread(() -> {
             try {
-                ContentResolver resolver = context.getContentResolver();
-                Bundle result = resolver.call(ImeScopeStatusProvider.URI,
-                        "report_scope", scope, null);
-                if (result != null && "system".equals(scope)) {
+                Bundle result = context.getContentResolver().call(
+                        ImeScopeStatusProvider.URI, "report_scope", scope, null);
+                if (result != null && "system".equals(scope)
+                        && result.getBoolean("accepted", false)) {
                     systemScopeReported = true;
                 } else if (result == null) {
                     XposedBridge.log("MixFlipCustom: scope report returned no result: " + scope);
+                } else if ("system".equals(scope)) {
+                    XposedBridge.log("MixFlipCustom: system scope report was rejected");
                 }
             } catch (Throwable error) {
                 XposedBridge.log("MixFlipCustom: scope report failed for " + scope + ": "

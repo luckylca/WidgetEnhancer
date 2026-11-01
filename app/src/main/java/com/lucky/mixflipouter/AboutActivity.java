@@ -37,7 +37,6 @@ public final class AboutActivity extends Activity {
     private TextView dndStatus;
     private TextView writeSettingsStatus;
     private TextView quickSettingsStatus;
-    private TextView lsposedStatus;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -111,10 +110,6 @@ public final class AboutActivity extends Activity {
         addDivider(permissions);
         quickSettingsStatus = addRow(permissions, "高级磁贴适配器", "正在检查…",
                 v -> startActivity(new Intent(this, QSTilePickerActivity.class)), true);
-        addDivider(permissions);
-        lsposedStatus = addRow(permissions, "LSPosed", "正在检查…",
-                v -> openLsposed(), true);
-
         root.addView(sectionTitle("维护"), marginTop(dp(22)));
         LinearLayout maintenance = addGroup(root);
         addRow(maintenance, "详细诊断", "Hook、媒体、歌词与数据状态",
@@ -226,9 +221,6 @@ public final class AboutActivity extends Activity {
         setStatus(dndStatus, dnd, "已授权", "需要授权");
         boolean canWrite = Settings.System.canWrite(this);
         setStatus(writeSettingsStatus, canWrite, "已授权", "需要授权");
-        Intent lsposed = lsposedLaunchIntent();
-        setStatus(lsposedStatus, lsposed != null, "管理器已安装", "未检测到管理器");
-
         try {
             Bundle health = getContentResolver().call(
                     Contract.PROVIDER_URI, "get_health", null, null);
@@ -279,19 +271,6 @@ public final class AboutActivity extends Activity {
         startSafely(new Intent().setComponent(new ComponentName(
                 Contract.TARGET_PACKAGE,
                 "com.miui.fliphome.settings.widget.WidgetSettingsActivity")));
-    }
-
-    private void openLsposed() {
-        Intent launch = lsposedLaunchIntent();
-        if (launch != null) startActivity(launch);
-        else startSafely(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:" + getPackageName())));
-    }
-
-    private Intent lsposedLaunchIntent() {
-        Intent launch = getPackageManager().getLaunchIntentForPackage("org.lsposed.manager");
-        return launch != null ? launch
-                : getPackageManager().getLaunchIntentForPackage("io.github.lsposed.manager");
     }
 
     private void startSafely(Intent intent) {

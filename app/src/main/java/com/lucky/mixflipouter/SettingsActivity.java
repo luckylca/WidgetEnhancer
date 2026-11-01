@@ -7,7 +7,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
@@ -161,23 +160,8 @@ public final class SettingsActivity extends Activity {
     }
 
     private void setImeReplacementEnabled(boolean enabled) {
-        if (enabled) {
-            Bundle scopeStatus = getImeScopeStatus();
-            boolean systemScope = scopeStatus != null
-                    && scopeStatus.getBoolean("system", false);
-            if (!systemScope) {
-                resetImeReplacementSwitch(false);
-                showImeScopeRequiredDialog();
-                return;
-            }
-            boolean wechatScope = scopeStatus.getBoolean("wechat", false);
-            if (!wechatScope) {
-                resetImeReplacementSwitch(false);
-                showWechatScopeNotDetectedDialog();
-                return;
-            }
-        }
-
+        // Keep the current-boot scope status visible, but don't make it a
+        // prerequisite for saving the user's replacement preference.
         saveImeReplacementEnabled(enabled);
     }
 
@@ -219,13 +203,13 @@ public final class SettingsActivity extends Activity {
         String replacement = enabled
                 ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。"
                 : "已关闭：仍可正常唤起系统当前输入法。";
-        String system = systemScope ? "系统框架 Hook 已生效。"
-                : "尚未检测到系统框架 Hook。";
+        String system = systemScope ? "系统进程回报：已收到。"
+                : "系统进程回报：未收到。";
         String wechat = wechatScope
-                ? "已在微信输入法进程中检测到模块。"
-                : "尚未收到微信输入法进程的模块回报；这不等于直接读取了 LSPosed 勾选状态。";
-        return replacement + "\n" + system + "外屏键盘布局适配：" + wechat
-                + "\n作用域需要：系统框架(system) 和微信输入法(com.tencent.wetype)。";
+                ? "微信输入法适配：已生效。"
+                : "微信输入法适配：未生效。";
+        return replacement + "\n" + system + "\n" + wechat
+                + "\n需要启用系统框架和微信输入法作用域。";
     }
 
     private void resetImeReplacementSwitch(boolean checked) {
@@ -235,52 +219,12 @@ public final class SettingsActivity extends Activity {
         bindImeReplacementSwitch();
     }
 
-    private void showImeScopeRequiredDialog() {
-        String message = "未检测到“系统框架（system）”Hook。请在 LSPosed 勾选系统框架，然后重启手机。";
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("先启用 LSPosed 作用域")
-                .setMessage(message)
-                .setNegativeButton("稍后", null)
-                .setPositiveButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
-                .show();
-    }
-
-    private void showWechatScopeNotDetectedDialog() {
-        String message = "本次开机还没有从微信输入法进程收到模块已加载回报。"
-                + "这项检测确认模块是否实际进入 com.tencent.wetype 进程，不能直接读取 LSPosed 的勾选框。"
-                + "请确认该作用域已勾选，并启动一次微信输入法；微信输入法替换仍可工作，但外屏布局适配要等它加载模块后才生效。";
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("尚未检测到微信输入法适配")
-                .setMessage(message)
-                .setNegativeButton("取消", null)
-                .setNeutralButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
-                .setPositiveButton("仍然开启", (dialog, which) ->
-                        saveImeReplacementEnabled(true))
-                .show();
-    }
-
     private void showImePreferenceScopeDialog() {
         new MaterialAlertDialogBuilder(this)
                 .setTitle("设置保存失败")
-                .setMessage("无法保存输入法切换设置。请重新打开本页重试；若问题仍在，请确认 LSPosed 中的系统框架（system）作用域已生效。")
-                .setNegativeButton("稍后", null)
-                .setPositiveButton("打开 LSPosed", (dialog, which) -> openLsposedManager())
+                .setMessage("无法保存输入法切换设置。请重新打开本页重试；若问题仍在，请确认系统框架作用域已生效。")
+                .setPositiveButton("知道了", null)
                 .show();
-    }
-
-    private void openLsposedManager() {
-        Intent launch = getPackageManager().getLaunchIntentForPackage("org.lsposed.manager");
-        if (launch == null) {
-            launch = getPackageManager().getLaunchIntentForPackage("io.github.lsposed.manager");
-        }
-        if (launch != null) {
-            startActivity(launch);
-        } else {
-            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:" + getPackageName())));
-            Toast.makeText(this, "未找到 LSPosed 管理器，请手动打开并检查本模块作用域。",
-                    Toast.LENGTH_LONG).show();
-        }
     }
 
     private void renderWidgets() {

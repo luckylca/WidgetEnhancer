@@ -22,7 +22,7 @@ import java.util.TreeMap;
 
 /** Builds a bounded diagnostics snapshot without user content, identifiers or file paths. */
 final class DiagnosticReport {
-    static final int SCHEMA_VERSION = 1;
+    static final int SCHEMA_VERSION = 2;
     private static final String[] HOOK_STAGES = {
             "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs"
     };
@@ -144,9 +144,7 @@ final class DiagnosticReport {
         return new JSONObject()
                 .put("flipHome", packageInfo(context, Contract.TARGET_PACKAGE))
                 .put("systemUi", packageInfo(context, Contract.SYSTEM_UI_PACKAGE))
-                .put("netease", packageInfo(context, Contract.NETEASE_PACKAGE))
-                .put("lsposedManager", packageInfo(context, "org.lsposed.manager"))
-                .put("lsposedManagerLegacy", packageInfo(context, "io.github.lsposed.manager"));
+                .put("netease", packageInfo(context, Contract.NETEASE_PACKAGE));
     }
 
     private static JSONObject environment(Context context, JSONObject hooks) throws Exception {
@@ -159,8 +157,6 @@ final class DiagnosticReport {
                 break;
             }
         }
-        boolean managerVisible = installed(context, "org.lsposed.manager")
-                || installed(context, "io.github.lsposed.manager");
         boolean hookEvidence = false;
         for (String stage : HOOK_STAGES) {
             JSONObject item = hooks.optJSONObject(stage);
@@ -171,7 +167,6 @@ final class DiagnosticReport {
         }
         return new JSONObject()
                 .put("rootIndicator", rootVisible ? "su_binary_visible" : "not_detectable_by_app")
-                .put("lsposedManagerVisible", managerVisible)
                 .put("lsposedHookEvidence", hookEvidence);
     }
 
@@ -186,15 +181,6 @@ final class DiagnosticReport {
             out.put("installed", false);
         }
         return out;
-    }
-
-    private static boolean installed(Context context, String packageName) {
-        try {
-            context.getPackageManager().getPackageInfo(packageName, 0);
-            return true;
-        } catch (PackageManager.NameNotFoundException ignored) {
-            return false;
-        }
     }
 
     private static JSONObject summarizeHooks(Bundle health) throws Exception {

@@ -894,11 +894,30 @@ public final class WeChatImeFullscreenHook {
                     @Override
                     protected void afterHookedMethod(MethodHookParam hook) {
                         int width = compactKeyboardWidth;
-                        if (width > 0) hook.setResult(width);
+                        if (width <= 0) return;
+                        if (isNineKeyKeyboardType(hook.args[0])) {
+                            Object original = hook.getResult();
+                            int nativeWidth = original instanceof Number
+                                    ? ((Number) original).intValue() : 0;
+                            // T9's own key grid leaves a large inset even when the
+                            // available display width is already applied. Let its
+                            // layout metric exceed the viewport slightly so the
+                            // visible keys use the full compact-screen width.
+                            int targetWidth = Math.max(nativeWidth,
+                                    Math.round(width * 1.06f));
+                            hook.setResult(targetWidth);
+                        } else {
+                            hook.setResult(width);
+                        }
                     }
                 });
         WIDTH_HOOKED_LOADERS.put(loader, true);
         XposedBridge.log("MixFlipCustom: native keyboard width and key scale hooks installed");
+    }
+
+    private static boolean isNineKeyKeyboardType(Object keyboardType) {
+        String type = String.valueOf(keyboardType);
+        return type.contains("T9") || type.contains("Nine");
     }
 
     private static void clearIndependentWidthScaleCache(View keyboard) {

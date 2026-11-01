@@ -44,7 +44,7 @@ public final class DiagnosticReportTest {
     }
 
     @Test
-    public void reportSchemaStartsAtOne() {
-        assertEquals(1, DiagnosticReport.SCHEMA_VERSION);
+    public void reportSchemaIsCurrentVersion() {
+        assertEquals(2, DiagnosticReport.SCHEMA_VERSION);
     }
 }

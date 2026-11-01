@@ -139,7 +139,6 @@ public final class DiagnosticsActivity extends Activity {
         addSection("运行环境",
                 line("Root", "su_binary_visible".equals(value(environment, "rootIndicator"))
                                 ? "应用可见 su" : "应用侧无法判断", true)
-                        + stateLine("LSPosed 管理器可见", bool(environment, "lsposedManagerVisible"))
                         + stateLine("LSPosed Hook 上报证据", bool(environment, "lsposedHookEvidence")));
 
         JSONObject hooks = report.optJSONObject("hooks");
