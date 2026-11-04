@@ -166,8 +166,10 @@ public final class OuterScreenInputMethodHook {
 
     private static void applyImeLockDecision(XC_MethodHook.MethodHookParam hook,
                                              String methodId, ClassLoader loader) {
-        if (!isFolded(loader) || !ImeReplacementSettings.isEnabledInSystemServer()) return;
-        if (isWeChatIme(methodId)) {
+        if (!isFolded(loader)) return;
+        String selectedPackage = ImeReplacementSettings.targetInSystemServer();
+        if (selectedPackage.isEmpty()) return;
+        if (methodId != null && methodId.startsWith(selectedPackage + "/")) {
             hook.setResult(true);
         } else if (methodId != null && methodId.startsWith(SOGOU_IME_PACKAGE + "/")) {
             // HyperOS keeps the current IME if it is already considered a valid
@@ -233,9 +235,10 @@ public final class OuterScreenInputMethodHook {
 
             Object imms = XposedHelpers.getObjectField(impl, "mImms");
             int userId = XposedHelpers.getIntField(imms, "mCurrentImeUserId");
-            boolean enabled = ImeReplacementSettings.isEnabledInSystemServer();
+            String selectedPackage = ImeReplacementSettings.targetInSystemServer();
+            boolean enabled = !selectedPackage.isEmpty();
             String target = enabled
-                    ? inputMethodIdForPackage(context, loader, WECHAT_IME_PACKAGE, userId)
+                    ? inputMethodIdForPackage(context, loader, selectedPackage, userId)
                     : getSecureStringForUser(context, INTERNAL_IME_KEY, userId);
             if ((target == null || target.isEmpty()) && !enabled) {
                 target = inputMethodIdForPackage(context, loader, SOGOU_IME_PACKAGE, userId);
@@ -243,12 +246,13 @@ public final class OuterScreenInputMethodHook {
             if (target == null || target.isEmpty()) {
                 XposedBridge.log("MixFlipCustom: folded IME switch skipped; enabled=" + enabled
                         + ", target unavailable for "
-                        + (enabled ? WECHAT_IME_PACKAGE : SOGOU_IME_PACKAGE));
+                        + (enabled ? selectedPackage : SOGOU_IME_PACKAGE));
                 return;
             }
 
             String current = getSecureStringForUser(context, "default_input_method", userId);
-            if (enabled && (current == null || !current.startsWith(WECHAT_IME_PACKAGE + "/"))) {
+            if (enabled && (current == null || (!current.startsWith(WECHAT_IME_PACKAGE + "/")
+                    && !current.startsWith(ImeReplacementSettings.DOUBAO_PACKAGE + "/")))) {
                 String internal = getSecureStringForUser(context, INTERNAL_IME_KEY, userId);
                 if (internal == null || internal.isEmpty()) {
                     putSecureStringForUser(context, INTERNAL_IME_KEY, current, userId);
@@ -261,7 +265,7 @@ public final class OuterScreenInputMethodHook {
                 }
                 putSecureStringForUser(context, "default_input_method", target, userId);
                 XposedBridge.log("MixFlipCustom: folded IME switched to " + target
-                        + (enabled ? " (WeChat setting enabled)" : " (WeChat setting disabled)"));
+                        + (enabled ? " (replacement enabled)" : " (replacement disabled)"));
             }
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: folded IME switch failed: " + error);

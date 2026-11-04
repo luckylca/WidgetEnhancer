@@ -4,6 +4,7 @@ import android.app.Application;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.hardware.display.DisplayManager;
 import android.graphics.Color;
 import android.graphics.Path;
 import android.graphics.Rect;
@@ -15,6 +16,8 @@ import android.os.Handler;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.Display;
+import android.view.Surface;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -27,6 +30,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -59,6 +63,7 @@ public final class WeChatImeFullscreenHook {
     private static final Pattern KEYBOARD_BUTTON_BOUNDS = Pattern.compile(
             "\\[(-?\\d+),\\s*(-?\\d+)\\]\\[(-?\\d+),\\s*(-?\\d+)\\]");
     private static volatile int compactKeyboardWidth;
+    private static volatile int compactT9MetricWidth;
     private static volatile boolean scopeReporterInstalled;
     private static volatile boolean scopeReported;
     private static volatile boolean scopeReportPending;
@@ -79,11 +84,27 @@ public final class WeChatImeFullscreenHook {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, KeyboardBaseline> KEYBOARD_BASELINES =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<String, KeyboardBaseline> KEYBOARD_TYPE_BASELINES =
+            Collections.synchronizedMap(new HashMap<>());
     private static final Map<View, Integer> AVAILABLE_ROOT_HEIGHTS =
             Collections.synchronizedMap(new WeakHashMap<>());
-    private static final Map<ClassLoader, Boolean> WIDTH_HOOKED_LOADERS =
+    private static final Map<View, Boolean> COMPACT_DISPLAY_STATES =
             Collections.synchronizedMap(new WeakHashMap<>());
-    private static final Map<View, Boolean> LAYOUT_REFRESHERS =
+    private static final Map<Object, SymbolRowBaseline> SYMBOL_ROW_BASELINES =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<View, Integer> SYMBOL_ITEM_LAYOUT_HEIGHTS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static volatile DisplayManager rotationDisplayManager;
+    private static volatile DisplayManager.DisplayListener rotationDisplayListener;
+    private static volatile boolean viewAttachObserverInstalled;
+    private static volatile boolean normalWidthRefreshPending;
+    private static volatile WeakReference<InputMethodService> rotationService =
+            new WeakReference<>(null);
+    private static volatile WeakReference<View> rotationDecor = new WeakReference<>(null);
+    private static volatile int rotationDisplayId = -1;
+    private static final Map<ClassLoader, List<XC_MethodHook.Unhook>> WIDTH_HOOKS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<View, ViewTreeObserver.OnGlobalLayoutListener> LAYOUT_REFRESHERS =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, Boolean> PENDING_ADAPTATIONS =
             Collections.synchronizedMap(new WeakHashMap<>());
@@ -107,35 +128,72 @@ public final class WeChatImeFullscreenHook {
                             InputMethodService service =
                                     (InputMethodService) hook.thisObject;
                             reportWeChatScope(service);
-                            Window window = null;
+                            Window window;
                             try {
                                 Dialog dialog = service.getWindow();
                                 window = dialog == null ? null : dialog.getWindow();
                                 if (window == null) return;
-                                WindowManager.LayoutParams attrs = window.getAttributes();
-                                int current = attrs.layoutInDisplayCutoutMode;
-                                Integer original = ORIGINAL_CUTOUT_MODES.putIfAbsent(window, current);
-                                if (original == null) original = current;
-                                boolean compact = isCompactCover(service);
-                                int desired = compact ? WindowManager.LayoutParams
-                                        .LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS : original;
-                                if (current != desired) {
-                                    attrs.layoutInDisplayCutoutMode = desired;
-                                    window.setAttributes(attrs);
-                                }
-                                configureEdgeToEdge(window, compact);
-                                if (!compact) compactKeyboardWidth = 0;
                             } catch (Throwable error) {
                                 XposedBridge.log("MixFlipCustom: WeChat window setup failed: "
                                         + error);
+                                return;
                             }
-                            if (window != null) {
+                            View decor = window.getDecorView();
+                            observeDisplayRotation(service, decor);
+                            installLayoutRefresher(service, decor);
+                            refreshDisplayState(service, decor);
+                        }
+                    });
+            XposedHelpers.findAndHookMethod(InputMethodService.class, "setInputView",
+                    View.class, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            InputMethodService service =
+                                    (InputMethodService) hook.thisObject;
+                            try {
+                                Dialog dialog = service.getWindow();
+                                Window window = dialog == null ? null : dialog.getWindow();
+                                if (window == null) return;
                                 View decor = window.getDecorView();
+                                observeDisplayRotation(service, decor);
                                 installLayoutRefresher(service, decor);
-                                schedule(service, decor, 0);
+                                refreshDisplayState(service, decor);
+                                if (!isCompactCover(service)
+                                        && hook.args[0] instanceof View) {
+                                    restoreNativeLayoutAfterViewAttach((View) hook.args[0]);
+                                }
+                            } catch (Throwable error) {
+                                XposedBridge.log("MixFlipCustom: input view refresh failed: "
+                                        + error);
                             }
                         }
                     });
+            XposedHelpers.findAndHookMethod(InputMethodService.class, "onCreateInputView",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            InputMethodService service =
+                                    (InputMethodService) hook.thisObject;
+                            if (!(hook.getResult() instanceof View)) return;
+                            try {
+                                Dialog dialog = service.getWindow();
+                                Window window = dialog == null ? null : dialog.getWindow();
+                                if (window == null) return;
+                                View decor = window.getDecorView();
+                                observeDisplayRotation(service, decor);
+                                installLayoutRefresher(service, decor);
+                                if (isCompactCover(service)) {
+                                    schedule(service, decor, 0);
+                                }
+                                new Handler(service.getMainLooper()).postDelayed(
+                                        () -> refreshDisplayState(service, decor), 200L);
+                            } catch (Throwable error) {
+                                XposedBridge.log("MixFlipCustom: created input view refresh "
+                                        + "failed: " + error);
+                            }
+                        }
+                    });
+            installRotatedViewAttachObserver();
             XposedHelpers.findAndHookMethod(InputMethodService.class, "onUpdateSelection",
                     int.class, int.class, int.class, int.class, int.class, int.class,
                     new XC_MethodHook() {
@@ -219,7 +277,8 @@ public final class WeChatImeFullscreenHook {
         if (baseline == null) {
             baseline = new WindowBaseline(decor.getSystemUiVisibility(),
                     window.getNavigationBarColor(), Build.VERSION.SDK_INT >= 29
-                    && window.isNavigationBarContrastEnforced());
+                    && window.isNavigationBarContrastEnforced(),
+                    getOnApplyWindowInsetsListener(decor));
             WINDOW_BASELINES.put(window, baseline);
         }
         if (compact) {
@@ -240,7 +299,7 @@ public final class WeChatImeFullscreenHook {
             });
             decor.requestApplyInsets();
         } else {
-            decor.setOnApplyWindowInsetsListener(null);
+            decor.setOnApplyWindowInsetsListener(baseline.onApplyWindowInsetsListener);
             decor.setSystemUiVisibility(baseline.systemUiVisibility);
             window.setDecorFitsSystemWindows(true);
             window.setNavigationBarColor(baseline.navigationBarColor);
@@ -248,6 +307,25 @@ public final class WeChatImeFullscreenHook {
                 window.setNavigationBarContrastEnforced(baseline.navigationBarContrastEnforced);
             }
             WINDOW_BASELINES.remove(window);
+            decor.requestApplyInsets();
+        }
+    }
+
+    private static View.OnApplyWindowInsetsListener getOnApplyWindowInsetsListener(
+            View view) {
+        try {
+            Field listenerInfoField = View.class.getDeclaredField("mListenerInfo");
+            listenerInfoField.setAccessible(true);
+            Object listenerInfo = listenerInfoField.get(view);
+            if (listenerInfo == null) return null;
+            Field listenerField = listenerInfo.getClass()
+                    .getDeclaredField("mOnApplyWindowInsetsListener");
+            listenerField.setAccessible(true);
+            Object listener = listenerField.get(listenerInfo);
+            return listener instanceof View.OnApplyWindowInsetsListener
+                    ? (View.OnApplyWindowInsetsListener) listener : null;
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -269,23 +347,317 @@ public final class WeChatImeFullscreenHook {
     private static void installLayoutRefresher(InputMethodService service, View decor) {
         synchronized (LAYOUT_REFRESHERS) {
             if (LAYOUT_REFRESHERS.containsKey(decor)) return;
-            LAYOUT_REFRESHERS.put(decor, true);
         }
         ViewTreeObserver observer = decor.getViewTreeObserver();
         if (!observer.isAlive()) return;
         WeakReference<InputMethodService> serviceRef = new WeakReference<>(service);
         WeakReference<View> decorRef = new WeakReference<>(decor);
-        observer.addOnGlobalLayoutListener(() -> {
+        ViewTreeObserver.OnGlobalLayoutListener listener = () -> {
             InputMethodService currentService = serviceRef.get();
             View currentDecor = decorRef.get();
-            if (currentService != null && currentDecor != null
-                    && isCompactCover(currentService)) {
-                schedule(currentService, currentDecor, 0);
+            if (currentService == null || currentDecor == null) return;
+            refreshDisplayState(currentService, currentDecor);
+        };
+        synchronized (LAYOUT_REFRESHERS) {
+            if (LAYOUT_REFRESHERS.containsKey(decor)) return;
+            LAYOUT_REFRESHERS.put(decor, listener);
+        }
+        observer.addOnGlobalLayoutListener(listener);
+    }
+
+    private static void observeDisplayRotation(InputMethodService service, View decor) {
+        try {
+            rotationService = new WeakReference<>(service);
+            rotationDecor = new WeakReference<>(decor);
+            Display display = getContextDisplay(service);
+            rotationDisplayId = display == null ? -1 : display.getDisplayId();
+            if (rotationDisplayListener != null) return;
+
+            DisplayManager manager = (DisplayManager) service.getSystemService(
+                    Context.DISPLAY_SERVICE);
+            if (manager == null) return;
+            DisplayManager.DisplayListener listener = new DisplayManager.DisplayListener() {
+                @Override
+                public void onDisplayAdded(int displayId) {}
+
+                @Override
+                public void onDisplayRemoved(int displayId) {}
+
+                @Override
+                public void onDisplayChanged(int displayId) {
+                    if (displayId != rotationDisplayId) return;
+                    InputMethodService currentService = rotationService.get();
+                    View currentDecor = rotationDecor.get();
+                    if (currentService != null && currentDecor != null) {
+                        refreshDisplayState(currentService, currentDecor);
+                    }
+                }
+            };
+            manager.registerDisplayListener(listener, new Handler(service.getMainLooper()));
+            rotationDisplayManager = manager;
+            rotationDisplayListener = listener;
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: display rotation observer unavailable: " + error);
+        }
+    }
+
+    private static void installRotatedViewAttachObserver() {
+        if (viewAttachObserverInstalled) return;
+        synchronized (WeChatImeFullscreenHook.class) {
+            if (viewAttachObserverInstalled) return;
+            XposedHelpers.findAndHookMethod(View.class, "onAttachedToWindow",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam hook) {
+                            InputMethodService service = rotationService.get();
+                            if (service == null) return;
+                            View view = (View) hook.thisObject;
+                            String className = view.getClass().getName();
+                            String packageName = view.getContext().getPackageName();
+                            if (!"com.tencent.wetype".equals(packageName)
+                                    && !className.startsWith("com.tencent.wetype.")) return;
+                            View root = view.getRootView();
+                            if (isCompactCover(service)) {
+                                if (findKeyboard(root) != null
+                                        && findByClassName(root, CANDIDATE_VIEW_CLASS) != null) {
+                                    schedule(service, root, 0);
+                                }
+                            } else if (isNormalCover(service)) {
+                                schedule(service, root, 0);
+                            } else {
+                                restoreNativeLayoutAfterViewAttach(root);
+                            }
+                        }
+                    });
+            viewAttachObserverInstalled = true;
+        }
+    }
+
+    /** Restore mutations left on a hidden keyboard when the system swaps input views. */
+    private static void restoreNativeLayoutAfterViewAttach(View root) {
+        View keyboard = findKeyboard(root);
+        if (keyboard == null) return;
+        try {
+            if (keyboard.getHeight() <= 0) return;
+            String type = String.valueOf(XposedHelpers.callMethod(keyboard, "getKeyboardType"));
+            KeyboardBaseline baseline = KEYBOARD_BASELINES.get(keyboard);
+            if (baseline == null) {
+                baseline = KEYBOARD_TYPE_BASELINES.get(type);
+                if (baseline != null) {
+                    KEYBOARD_BASELINES.put(keyboard, baseline);
+                } else {
+                    ensureKeyboardBaseline(keyboard);
+                    XposedBridge.log("MixFlipCustom: captured native keyboard baseline on "
+                            + "normal view attach");
+                    return;
+                }
             }
-        });
+            if (baseline == null || baseline.appliedScale < 0.0f) return;
+            View candidate = findByClassName(root, CANDIDATE_VIEW_CLASS);
+            if (candidate != null) restoreLayout(candidate, keyboard);
+            restoreKeyboard(keyboard);
+            restorePunctuationRows();
+            XposedBridge.log("MixFlipCustom: restored native keyboard data on normal view attach");
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: native keyboard attach restore failed: " + error);
+        }
+    }
+
+    private static Display getContextDisplay(Context context) {
+        Display display = context.getDisplay();
+        if (display != null) return display;
+        WindowManager windowManager = (WindowManager) context.getSystemService(
+                Context.WINDOW_SERVICE);
+        return windowManager == null ? null : windowManager.getDefaultDisplay();
+    }
+
+    private static String getKeyboardType(View keyboard) {
+        try {
+            return String.valueOf(XposedHelpers.callMethod(keyboard, "getKeyboardType"));
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static int readNativeKeyboardWidthMetric(View keyboard, String methodName) {
+        try {
+            Class<?> metricClass = XposedHelpers.findClass(
+                    "com.tencent.wetype.plugin.hld.utils.m1",
+                    keyboard.getClass().getClassLoader());
+            Object keyboardType = XposedHelpers.callMethod(keyboard, "getKeyboardType");
+            Object instance = null;
+            for (Field field : metricClass.getDeclaredFields()) {
+                if (!Modifier.isStatic(field.getModifiers())
+                        || field.getType() != metricClass) continue;
+                field.setAccessible(true);
+                instance = field.get(null);
+                if (instance != null) break;
+            }
+            if (instance == null) return 0;
+            Object value = XposedHelpers.callMethod(instance, methodName, keyboardType);
+            return value instanceof Number ? ((Number) value).intValue() : 0;
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: native " + methodName
+                    + " keyboard width unavailable: " + error);
+            return 0;
+        }
+    }
+
+    private static void resetNativeKeyboardCaches(View keyboard, Context context) {
+        try {
+            Class<?> metricClass = XposedHelpers.findClass(
+                    "com.tencent.wetype.plugin.hld.utils.m1",
+                    keyboard.getClass().getClassLoader());
+            for (Field field : metricClass.getDeclaredFields()) {
+                if (!Modifier.isStatic(field.getModifiers())
+                        || field.getType() != metricClass) continue;
+                field.setAccessible(true);
+                Object instance = field.get(null);
+                if (instance == null) continue;
+                XposedHelpers.callMethod(instance, "i2", context, true);
+                return;
+            }
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: native keyboard cache reset failed: " + error);
+        }
+    }
+
+    private static int getConfigurationDisplayRotation(Context context) {
+        try {
+            Object windowConfig = XposedHelpers.getObjectField(
+                    context.getResources().getConfiguration(), "windowConfiguration");
+            Object rotation = XposedHelpers.callMethod(windowConfig, "getDisplayRotation");
+            return rotation instanceof Number ? ((Number) rotation).intValue() : -1;
+        } catch (Throwable ignored) {
+            Display display = getContextDisplay(context);
+            return display == null ? -1 : display.getRotation();
+        }
+    }
+
+    private static void refreshDisplayState(InputMethodService service, View decor) {
+        boolean compact = isCompactCover(service);
+        Boolean wasCompact = COMPACT_DISPLAY_STATES.put(decor, compact);
+        if (wasCompact == null || wasCompact.booleanValue() != compact) {
+            XposedBridge.log("MixFlipCustom: cover layout state rotation="
+                    + getConfigurationDisplayRotation(service) + " compact=" + compact
+                    + " previous=" + wasCompact);
+        }
+        if (compact) {
+            if (!Boolean.TRUE.equals(wasCompact)) {
+                configureWindowForCompactDisplay(service);
+                installLayoutRefresher(service, decor);
+            }
+            schedule(service, decor, 0);
+        } else {
+            if (Boolean.TRUE.equals(wasCompact)) {
+                restoreWindowForNormalDisplay(service);
+                View keyboard = findKeyboard(decor);
+                View candidate = findByClassName(decor, CANDIDATE_VIEW_CLASS);
+                restorePunctuationRows();
+                if (keyboard == null) {
+                    compactKeyboardWidth = 0;
+                    compactT9MetricWidth = 0;
+                    new Handler(service.getMainLooper()).postDelayed(() -> {
+                        if (isCompactCover(service)) return;
+                        View currentKeyboard = findKeyboard(decor);
+                        if (currentKeyboard == null) return;
+                        resetNativeKeyboardCaches(currentKeyboard, service);
+                        restoreKeyboard(currentKeyboard);
+                    }, 400L);
+                    disableNativeWidthHooks();
+                    return;
+                }
+                KeyboardBaseline baseline = KEYBOARD_BASELINES.get(keyboard);
+                if (baseline == null) {
+                    baseline = KEYBOARD_TYPE_BASELINES.get(getKeyboardType(keyboard));
+                }
+                int nativeWidth = baseline != null && baseline.nativeWidth > 0
+                        ? baseline.nativeWidth : keyboard.getWidth();
+                int nativeT9Width = baseline != null && baseline.nativeT9Width > 0
+                        ? baseline.nativeT9Width : nativeWidth;
+                compactKeyboardWidth = nativeWidth > 0 ? nativeWidth : decor.getWidth();
+                compactT9MetricWidth = isNineKeyKeyboardType(getKeyboardType(keyboard))
+                        ? nativeT9Width : 0;
+                if (candidate != null) restoreLayout(candidate, keyboard);
+                restoreKeyboard(keyboard);
+                keyboard.requestLayout();
+                normalWidthRefreshPending = true;
+                new Handler(service.getMainLooper()).postDelayed(() -> {
+                    if (isCompactCover(service)) {
+                        normalWidthRefreshPending = false;
+                        schedule(service, decor, 0);
+                        return;
+                    }
+                    View currentKeyboard = findKeyboard(decor);
+                    if (currentKeyboard != null) {
+                        resetNativeKeyboardCaches(currentKeyboard, service);
+                        restoreKeyboard(currentKeyboard);
+                    }
+                    normalWidthRefreshPending = false;
+                    disableNativeWidthHooks();
+                    compactKeyboardWidth = 0;
+                    compactT9MetricWidth = 0;
+                    if (isNormalCover(service)) schedule(service, decor, 0);
+                }, 500L);
+            } else {
+                if (!normalWidthRefreshPending && !isNormalCover(service)) {
+                    compactKeyboardWidth = 0;
+                    compactT9MetricWidth = 0;
+                    disableNativeWidthHooks();
+                }
+                if (isNormalCover(service) && !normalWidthRefreshPending) {
+                    schedule(service, decor, 0);
+                } else {
+                    restoreNativeLayoutAfterViewAttach(decor);
+                }
+            }
+        }
+    }
+
+    private static void configureWindowForCompactDisplay(InputMethodService service) {
+        try {
+            Dialog dialog = service.getWindow();
+            Window window = dialog == null ? null : dialog.getWindow();
+            if (window == null) return;
+            WindowManager.LayoutParams attrs = window.getAttributes();
+            ORIGINAL_CUTOUT_MODES.putIfAbsent(window, attrs.layoutInDisplayCutoutMode);
+            int desired = WindowManager.LayoutParams
+                    .LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            if (attrs.layoutInDisplayCutoutMode != desired) {
+                attrs.layoutInDisplayCutoutMode = desired;
+                window.setAttributes(attrs);
+            }
+            configureEdgeToEdge(window, true);
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: compact WeChat window setup failed: " + error);
+        }
+    }
+
+    private static void restoreWindowForNormalDisplay(InputMethodService service) {
+        try {
+            Dialog dialog = service.getWindow();
+            Window window = dialog == null ? null : dialog.getWindow();
+            if (window == null) return;
+            configureEdgeToEdge(window, false);
+            Integer originalCutoutMode = ORIGINAL_CUTOUT_MODES.remove(window);
+            if (originalCutoutMode != null) {
+                WindowManager.LayoutParams attrs = window.getAttributes();
+                if (attrs.layoutInDisplayCutoutMode != originalCutoutMode) {
+                    attrs.layoutInDisplayCutoutMode = originalCutoutMode;
+                    window.setAttributes(attrs);
+                }
+            }
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: normal WeChat window restore failed: " + error);
+        }
     }
 
     private static void adapt(InputMethodService service, View decor, int attempt) {
+        if (isNormalCover(service)) {
+            adaptNormalNineKey(service, decor, attempt);
+            return;
+        }
+        if (!isCompactCover(service)) return;
         View keyboard = findKeyboard(decor);
         View candidate = findByClassName(decor, CANDIDATE_VIEW_CLASS);
         if (keyboard == null || candidate == null) {
@@ -299,12 +671,6 @@ public final class WeChatImeFullscreenHook {
             retry(service, decor, attempt, "keyboard or candidate panel not ready");
             return;
         }
-        if (!isCompactCover(service)) {
-            restoreLayout(candidate, keyboard);
-            restoreKeyboard(keyboard);
-            return;
-        }
-
         try {
             ensureKeyboardBaseline(keyboard);
             boolean paddingChanged = clearBottomPadding(keyboard);
@@ -326,6 +692,81 @@ public final class WeChatImeFullscreenHook {
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat cover layout failed: " + error);
             retry(service, decor, attempt, "layout adaptation failed");
+        }
+    }
+
+    private static void adaptNormalNineKey(InputMethodService service, View decor, int attempt) {
+        View keyboard = findKeyboard(decor);
+        if (keyboard == null || keyboard.getWidth() <= 0 || keyboard.getHeight() <= 0) {
+            retry(service, decor, attempt, "normal keyboard not ready");
+            return;
+        }
+        View candidate = findByClassName(decor, CANDIDATE_VIEW_CLASS);
+        clearBottomPadding(keyboard);
+        if (!isNineKeyKeyboardType(getKeyboardType(keyboard))) {
+            compactKeyboardWidth = 0;
+            compactT9MetricWidth = 0;
+            disableNativeWidthHooks();
+            if (candidate != null) alignNormalKeyboardBottom(decor, candidate, keyboard);
+            return;
+        }
+        try {
+            ensureKeyboardBaseline(keyboard);
+            KeyboardBaseline baseline = KEYBOARD_BASELINES.get(keyboard);
+            int width = keyboard.getWidth();
+            if (baseline.appliedScale == -2.0f && baseline.appliedWidth == width) {
+                if (candidate != null) alignNormalKeyboardBottom(decor, candidate, keyboard);
+                return;
+            }
+            compactKeyboardWidth = width;
+            compactT9MetricWidth = width;
+            ensureNativeWidthHook(keyboard);
+            resetNativeKeyboardCaches(keyboard, service);
+            int target = Math.round(width * 0.98f);
+            for (int index = 0; index < 7; index++) {
+                clearIndependentWidthScaleCache(keyboard);
+                updateKeyboardData(keyboard, XposedHelpers.callMethod(baseline.data, "deepCopy"));
+                Rect bounds = getKeyboardButtonBounds(keyboard);
+                if (bounds == null || bounds.width() <= target) break;
+                int adjusted = Math.max(1, Math.round(compactT9MetricWidth
+                        * target / (float) bounds.width()));
+                if (adjusted >= compactT9MetricWidth) break;
+                compactT9MetricWidth = adjusted;
+            }
+            baseline.appliedScale = -2.0f;
+            baseline.appliedWidth = width;
+            centerKeyboardContent(keyboard);
+            if (candidate != null) alignNormalKeyboardBottom(decor, candidate, keyboard);
+            keyboard.invalidate();
+            XposedBridge.log("MixFlipCustom: normal cover nine-key fitted width=" + width
+                    + " bounds=" + getKeyboardButtonBounds(keyboard));
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: normal cover nine-key fitting failed: " + error);
+        }
+    }
+
+    private static void alignNormalKeyboardBottom(View decor, View candidate, View keyboard) {
+        View content = candidate.getParent() instanceof View ? (View) candidate.getParent() : null;
+        View frame = content != null && content.getParent() instanceof View
+                ? (View) content.getParent() : null;
+        View root = frame != null && frame.getParent() instanceof View
+                ? (View) frame.getParent() : null;
+        Rect bounds = getKeyboardButtonBounds(keyboard);
+        if (root == null || bounds == null || decor.getHeight() <= 0) return;
+        float original = ROOT_TRANSLATIONS.computeIfAbsent(root, View::getTranslationY);
+        int[] keyboardLocation = new int[2];
+        int[] decorLocation = new int[2];
+        keyboard.getLocationOnScreen(keyboardLocation);
+        decor.getLocationOnScreen(decorLocation);
+        float bottomAtOriginal = keyboardLocation[1] + bounds.bottom
+                - root.getTranslationY() + original;
+        float margin = 8.0f * keyboard.getResources().getDisplayMetrics().density;
+        float shift = Math.max(0.0f,
+                decorLocation[1] + decor.getHeight() - margin - bottomAtOriginal);
+        float target = original + Math.min(shift, 40.0f
+                * keyboard.getResources().getDisplayMetrics().density);
+        if (Math.abs(root.getTranslationY() - target) > 0.5f) {
+            root.setTranslationY(target);
         }
     }
 
@@ -560,6 +1001,7 @@ public final class WeChatImeFullscreenHook {
                 // Some keyboard modes have no symbol grid attached.
             }
         }
+        restorePunctuationRows();
         View symbolPager = findByClassName(keyboard,
                 "com.tencent.wetype.plugin.hld.symbol.ImeSymbolPagerView");
         if (symbolPager instanceof ViewGroup) {
@@ -602,21 +1044,39 @@ public final class WeChatImeFullscreenHook {
     }
 
     private static void ensureKeyboardBaseline(View keyboard) throws Throwable {
-        Object data = XposedHelpers.callMethod(keyboard, "getOriginData");
         String type = String.valueOf(XposedHelpers.callMethod(keyboard, "getKeyboardType"));
         KeyboardBaseline current = KEYBOARD_BASELINES.get(keyboard);
         if (current != null && current.type.equals(type)) return;
 
+        KeyboardBaseline sharedBaseline = KEYBOARD_TYPE_BASELINES.get(type);
+        if (sharedBaseline != null) {
+            sharedBaseline.appliedScale = -1.0f;
+            sharedBaseline.appliedWidth = -1;
+            sharedBaseline.appliedMetricWidth = -1;
+            KEYBOARD_BASELINES.put(keyboard, sharedBaseline);
+            return;
+        }
+
+        Object data = XposedHelpers.callMethod(keyboard, "getOriginData");
+
         Object originalData = XposedHelpers.callMethod(data, "deepCopy");
         Object config = XposedHelpers.callMethod(originalData, "getConfig");
+        int nativeWidth = readNativeKeyboardWidthMetric(keyboard, "I0");
+        int nativeT9Width = readNativeKeyboardWidthMetric(keyboard, "y1");
         KeyboardBaseline baseline = new KeyboardBaseline(originalData, type,
                 copyFloatList(XposedHelpers.callMethod(config, "getLineHeight")),
                 copyFloatList(XposedHelpers.callMethod(config, "getLineGapHeights")),
                 copyIntegerList(XposedHelpers.callMethod(config, "getLineAlign")),
                 ((Number) XposedHelpers.callMethod(config, "getVHeight")).floatValue(),
                 ((Number) XposedHelpers.callMethod(config, "getLineGapHeight")).intValue(),
-                keyboard.getHeight(), keyboard.getTranslationX());
+                keyboard.getHeight(), keyboard.getTranslationX(),
+                keyboard.getResources().getDisplayMetrics().density,
+                nativeWidth, nativeT9Width);
+        XposedBridge.log("MixFlipCustom: captured native keyboard metrics type=" + type
+                + " width=" + nativeWidth + " t9=" + nativeT9Width
+                + " viewWidth=" + keyboard.getWidth());
         KEYBOARD_BASELINES.put(keyboard, baseline);
+        KEYBOARD_TYPE_BASELINES.put(type, baseline);
     }
 
     private static boolean applyNativeKeyboardGeometry(View keyboard) throws Throwable {
@@ -628,7 +1088,12 @@ public final class WeChatImeFullscreenHook {
         ensureNativeWidthHook(keyboard);
         float scale = keyboard.getHeight() / (float) baseline.height;
         if (Math.abs(scale - baseline.appliedScale) < 0.01f
-                && availableWidth == baseline.appliedWidth) return true;
+                && availableWidth == baseline.appliedWidth) {
+            compactT9MetricWidth = baseline.appliedMetricWidth;
+            return true;
+        }
+        compactT9MetricWidth = isNineKeyKeyboardType(baseline.type)
+                ? Math.round(availableWidth * 1.06f) : 0;
 
         Object data = XposedHelpers.callMethod(baseline.data, "deepCopy");
         Object config = XposedHelpers.callMethod(data, "getConfig");
@@ -636,15 +1101,43 @@ public final class WeChatImeFullscreenHook {
         clearIndependentWidthScaleCache(keyboard);
         updateKeyboardData(keyboard, data);
         float fillScale = getBottomFillScale(keyboard);
-        if (Math.abs(fillScale - 1.0f) > 0.01f) {
+        float appliedHeightScale = scale;
+        if (Math.abs(fillScale - 1.0f) > 0.01f
+                || isNineKeyKeyboardType(baseline.type)) {
             data = XposedHelpers.callMethod(baseline.data, "deepCopy");
             config = XposedHelpers.callMethod(data, "getConfig");
-            configureKeyboardData(config, baseline, scale * fillScale);
+            float nineKeyScale = keyboard.getHeight() > 620 ? 0.62f : 0.88f;
+            appliedHeightScale = scale * fillScale
+                    * (isNineKeyKeyboardType(baseline.type) ? nineKeyScale : 1.0f);
+            configureKeyboardData(config, baseline, appliedHeightScale);
             clearIndependentWidthScaleCache(keyboard);
             updateKeyboardData(keyboard, data);
         }
+        if (isNineKeyKeyboardType(baseline.type)) {
+            int targetWidth = Math.round(availableWidth * 0.92f);
+            for (int attempt = 0; attempt < 6; attempt++) {
+                Rect bounds = getKeyboardButtonBounds(keyboard);
+                if (bounds == null || bounds.width() <= targetWidth) break;
+                int adjusted = Math.max(1, Math.round(compactT9MetricWidth
+                        * targetWidth / (float) bounds.width()));
+                if (adjusted >= compactT9MetricWidth) break;
+                compactT9MetricWidth = adjusted;
+                data = XposedHelpers.callMethod(baseline.data, "deepCopy");
+                config = XposedHelpers.callMethod(data, "getConfig");
+                configureKeyboardData(config, baseline, appliedHeightScale);
+                clearIndependentWidthScaleCache(keyboard);
+                updateKeyboardData(keyboard, data);
+            }
+        }
         baseline.appliedScale = scale;
         baseline.appliedWidth = availableWidth;
+        baseline.appliedMetricWidth = compactT9MetricWidth;
+        if (isNineKeyKeyboardType(baseline.type)) {
+            XposedBridge.log("MixFlipCustom: T9 geometry height=" + keyboard.getHeight()
+                    + " bounds=" + getKeyboardButtonBounds(keyboard) + " scale="
+                    + appliedHeightScale + " lineHeights=" + baseline.lineHeight
+                    + " gaps=" + scaledLineGapHeights(baseline, appliedHeightScale));
+        }
         return true;
     }
 
@@ -678,6 +1171,20 @@ public final class WeChatImeFullscreenHook {
             // The native list uses a fixed 68dp item height, which clips its fourth
             // punctuation row on the shorter cover-screen keyboard.
             int itemHeight = Math.max(1, availableHeight / 4);
+            SymbolRowBaseline baseline = SYMBOL_ROW_BASELINES.get(adapter);
+            if (baseline == null) {
+                baseline = new SymbolRowBaseline(getNativeSymbolItemHeight(list), list);
+                SYMBOL_ROW_BASELINES.put(adapter, baseline);
+                for (int index = 0; index < list.getChildCount(); index++) {
+                    View item = list.getChildAt(index);
+                    ViewGroup.LayoutParams params = item.getLayoutParams();
+                    if (params != null) {
+                        SYMBOL_ITEM_LAYOUT_HEIGHTS.put(item, params.height);
+                    }
+                }
+            } else {
+                baseline.list = new WeakReference<>(list);
+            }
             XposedHelpers.callMethod(adapter, "k", itemHeight);
 
             boolean changed = false;
@@ -693,6 +1200,52 @@ public final class WeChatImeFullscreenHook {
             if (changed) list.requestLayout();
         }
         centerSymbolGrid(keyboard, list);
+    }
+
+    private static int getNativeSymbolItemHeight(ViewGroup list) {
+        for (int index = 0; index < list.getChildCount(); index++) {
+            View item = list.getChildAt(index);
+            ViewGroup.LayoutParams params = item.getLayoutParams();
+            if (params != null && params.height > 0) return params.height;
+            if (item.getHeight() > 0) return item.getHeight();
+        }
+        return Math.max(1, Math.round(68.0f
+                * list.getResources().getDisplayMetrics().density));
+    }
+
+    private static void restorePunctuationRows() {
+        List<Map.Entry<Object, SymbolRowBaseline>> baselines;
+        synchronized (SYMBOL_ROW_BASELINES) {
+            baselines = new ArrayList<>(SYMBOL_ROW_BASELINES.entrySet());
+            SYMBOL_ROW_BASELINES.clear();
+        }
+        for (Map.Entry<Object, SymbolRowBaseline> entry : baselines) {
+            Object adapter = entry.getKey();
+            SymbolRowBaseline baseline = entry.getValue();
+            if (adapter == null || baseline == null) continue;
+            try {
+                XposedHelpers.callMethod(adapter, "k", baseline.itemHeight);
+                ViewGroup list = baseline.list.get();
+                if (list == null) continue;
+                boolean changed = false;
+                for (int index = 0; index < list.getChildCount(); index++) {
+                    View item = list.getChildAt(index);
+                    ViewGroup.LayoutParams params = item.getLayoutParams();
+                    if (params == null) continue;
+                    Integer originalHeight = SYMBOL_ITEM_LAYOUT_HEIGHTS.remove(item);
+                    int restoredHeight = originalHeight == null
+                            ? baseline.itemHeight : originalHeight;
+                    if (params.height != restoredHeight) {
+                        params.height = restoredHeight;
+                        item.setLayoutParams(params);
+                        changed = true;
+                    }
+                }
+                if (changed) list.requestLayout();
+            } catch (Throwable error) {
+                XposedBridge.log("MixFlipCustom: punctuation row restore failed: " + error);
+            }
+        }
     }
 
     /** WeChat 4.0 renders the full symbol page in its own self-drawn keyboard view. */
@@ -764,7 +1317,7 @@ public final class WeChatImeFullscreenHook {
             float scale) throws Throwable {
         XposedHelpers.callMethod(config, "setLineHeight", scaledList(baseline.lineHeight, scale));
         XposedHelpers.callMethod(config, "setLineGapHeights",
-                scaledList(baseline.lineGapHeights, scale));
+                scaledLineGapHeights(baseline, scale));
         XposedHelpers.callMethod(config, "setLineAlign",
                 new ArrayList<>(baseline.lineAlign));
         XposedHelpers.callMethod(config, "setVHeight", Float.valueOf(baseline.vHeight * scale));
@@ -773,13 +1326,28 @@ public final class WeChatImeFullscreenHook {
         XposedHelpers.callMethod(config, "setGravity", Integer.valueOf(Gravity.LEFT));
     }
 
+    private static List<Float> scaledLineGapHeights(KeyboardBaseline baseline, float scale) {
+        List<Float> result = scaledList(baseline.lineGapHeights, scale);
+        if (isNineKeyKeyboardType(baseline.type)) {
+            float extraGap = Math.round(11.0f * baseline.density);
+            for (int index = 0; index < result.size(); index++) {
+                result.set(index, result.get(index) + extraGap);
+            }
+        }
+        return result;
+    }
+
     private static float getBottomFillScale(View keyboard) {
         try {
             Rect bounds = getKeyboardButtonBounds(keyboard);
             if (bounds == null) return 1.0f;
             int usedHeight = bounds.bottom;
-            if (usedHeight <= 0 || usedHeight >= keyboard.getHeight()) return 1.0f;
-            int bottomMargin = Math.round(11.0f
+            KeyboardBaseline baseline = KEYBOARD_BASELINES.get(keyboard);
+            boolean nineKey = baseline != null && isNineKeyKeyboardType(baseline.type);
+            if (usedHeight <= 0 || (usedHeight >= keyboard.getHeight() && !nineKey)) {
+                return 1.0f;
+            }
+            int bottomMargin = Math.round((nineKey ? 12.0f : 11.0f)
                     * keyboard.getResources().getDisplayMetrics().density);
             float fit = (keyboard.getHeight() - bottomMargin) / (float) usedHeight;
             return Math.max(0.75f, Math.min(1.15f, fit));
@@ -876,43 +1444,65 @@ public final class WeChatImeFullscreenHook {
 
     private static void ensureNativeWidthHook(View keyboard) throws Throwable {
         ClassLoader loader = keyboard.getClass().getClassLoader();
-        if (Boolean.TRUE.equals(WIDTH_HOOKED_LOADERS.get(loader))) return;
-        Class<?> metricClass = XposedHelpers.findClass(
-                "com.tencent.wetype.plugin.hld.utils.m1", loader);
-        Class<?> keyboardType = XposedHelpers.callMethod(keyboard, "getKeyboardType")
-                .getClass();
-        XposedHelpers.findAndHookMethod(metricClass, "I0", keyboardType,
-                new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam hook) {
-                        int width = compactKeyboardWidth;
-                        if (width > 0) hook.setResult(width);
+        synchronized (WIDTH_HOOKS) {
+            if (WIDTH_HOOKS.containsKey(loader)) return;
+            Class<?> metricClass = XposedHelpers.findClass(
+                    "com.tencent.wetype.plugin.hld.utils.m1", loader);
+            Class<?> keyboardType = XposedHelpers.callMethod(keyboard, "getKeyboardType")
+                    .getClass();
+            List<XC_MethodHook.Unhook> hooks = new ArrayList<>();
+            try {
+                hooks.add(XposedHelpers.findAndHookMethod(metricClass, "I0", keyboardType,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam hook) {
+                                int width = compactKeyboardWidth;
+                                if (width > 0) hook.setResult(width);
+                            }
+                        }));
+                hooks.add(XposedHelpers.findAndHookMethod(metricClass, "y1", keyboardType,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam hook) {
+                                int width = compactKeyboardWidth;
+                                if (width <= 0) return;
+                                if (isNineKeyKeyboardType(hook.args[0])) {
+                                    int targetWidth = compactT9MetricWidth > 0
+                                            ? compactT9MetricWidth : Math.round(width * 1.06f);
+                                    hook.setResult(targetWidth);
+                                } else {
+                                    hook.setResult(width);
+                                }
+                            }
+                        }));
+                WIDTH_HOOKS.put(loader, hooks);
+                XposedBridge.log("MixFlipCustom: native keyboard width hooks enabled for "
+                        + "rotated cover layout");
+            } catch (Throwable error) {
+                for (XC_MethodHook.Unhook hook : hooks) hook.unhook();
+                throw error;
+            }
+        }
+    }
+
+    private static void disableNativeWidthHooks() {
+        synchronized (WIDTH_HOOKS) {
+            for (List<XC_MethodHook.Unhook> hooks : WIDTH_HOOKS.values()) {
+                for (XC_MethodHook.Unhook hook : hooks) {
+                    try {
+                        hook.unhook();
+                    } catch (Throwable error) {
+                        XposedBridge.log("MixFlipCustom: native keyboard width hook removal "
+                                + "failed: " + error);
                     }
-                });
-        XposedHelpers.findAndHookMethod(metricClass, "y1", keyboardType,
-                new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam hook) {
-                        int width = compactKeyboardWidth;
-                        if (width <= 0) return;
-                        if (isNineKeyKeyboardType(hook.args[0])) {
-                            Object original = hook.getResult();
-                            int nativeWidth = original instanceof Number
-                                    ? ((Number) original).intValue() : 0;
-                            // T9's own key grid leaves a large inset even when the
-                            // available display width is already applied. Let its
-                            // layout metric exceed the viewport slightly so the
-                            // visible keys use the full compact-screen width.
-                            int targetWidth = Math.max(nativeWidth,
-                                    Math.round(width * 1.06f));
-                            hook.setResult(targetWidth);
-                        } else {
-                            hook.setResult(width);
-                        }
-                    }
-                });
-        WIDTH_HOOKED_LOADERS.put(loader, true);
-        XposedBridge.log("MixFlipCustom: native keyboard width and key scale hooks installed");
+                }
+            }
+            if (!WIDTH_HOOKS.isEmpty()) {
+                WIDTH_HOOKS.clear();
+                XposedBridge.log("MixFlipCustom: native keyboard width hooks disabled for "
+                        + "normal layout");
+            }
+        }
     }
 
     private static boolean isNineKeyKeyboardType(Object keyboardType) {
@@ -925,6 +1515,7 @@ public final class WeChatImeFullscreenHook {
             Class<?> metricClass = XposedHelpers.findClass(
                     "com.tencent.wetype.plugin.hld.utils.m1",
                     keyboard.getClass().getClassLoader());
+            int cleared = 0;
             for (Field field : metricClass.getDeclaredFields()) {
                 if (!Modifier.isStatic(field.getModifiers())) continue;
                 try {
@@ -937,13 +1528,16 @@ public final class WeChatImeFullscreenHook {
                                 || args[0] != int.class || args[1] != boolean.class
                                 || method.getReturnType() != double.class) continue;
                         XposedHelpers.callMethod(cache, "clear");
-                        return;
+                        cleared++;
+                        break;
                     }
                 } catch (Throwable ignored) {
                     // Keep scanning: WeChat obfuscates the cache field name per release.
                 }
             }
-            XposedBridge.log("MixFlipCustom: independent key-width cache was not found");
+            if (cleared == 0) {
+                XposedBridge.log("MixFlipCustom: independent key-width cache was not found");
+            }
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: key width cache refresh failed: " + error);
         }
@@ -952,12 +1546,27 @@ public final class WeChatImeFullscreenHook {
 
     private static void restoreKeyboard(View keyboard) {
         KeyboardBaseline baseline = KEYBOARD_BASELINES.remove(keyboard);
+        if (baseline == null) {
+            try {
+                String type = String.valueOf(XposedHelpers.callMethod(keyboard,
+                        "getKeyboardType"));
+                baseline = KEYBOARD_TYPE_BASELINES.get(type);
+            } catch (Throwable ignored) {
+                // A fresh view may not have a keyboard type until it is attached.
+            }
+        }
         if (baseline == null) return;
-        compactKeyboardWidth = 0;
         try {
             Object data = XposedHelpers.callMethod(baseline.data, "deepCopy");
+            clearIndependentWidthScaleCache(keyboard);
             updateKeyboardData(keyboard, data);
+            clearIndependentWidthScaleCache(keyboard);
             keyboard.setTranslationX(baseline.translationX);
+            keyboard.requestLayout();
+            keyboard.invalidate();
+            baseline.appliedScale = -1.0f;
+            baseline.appliedWidth = -1;
+            baseline.appliedMetricWidth = -1;
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat keyboard restore failed: " + error);
         }
@@ -1048,9 +1657,27 @@ public final class WeChatImeFullscreenHook {
         schedule(service, decor, attempt + 1);
     }
 
+    private static boolean isNormalCover(Context context) {
+        if (context == null) return false;
+        Configuration config = context.getResources().getConfiguration();
+        int shortSide = Math.min(config.screenWidthDp, config.screenHeightDp);
+        int longSide = Math.max(config.screenWidthDp, config.screenHeightDp);
+        return config.orientation == Configuration.ORIENTATION_PORTRAIT
+                && getConfigurationDisplayRotation(context) == Surface.ROTATION_0
+                && shortSide > 0 && shortSide <= MAX_COMPACT_SHORT_SIDE_DP
+                && longSide <= MAX_COMPACT_LONG_SIDE_DP;
+    }
+
     private static boolean isCompactCover(Context context) {
         if (context == null) return false;
         Configuration config = context.getResources().getConfiguration();
+        if (config.orientation != Configuration.ORIENTATION_PORTRAIT) return false;
+        int rotation = getConfigurationDisplayRotation(context);
+        if (rotation < 0) {
+            Display display = getContextDisplay(context);
+            rotation = display == null ? -1 : display.getRotation();
+        }
+        if (rotation != Surface.ROTATION_180) return false;
         int shortSide = Math.min(config.screenWidthDp, config.screenHeightDp);
         int longSide = Math.max(config.screenWidthDp, config.screenHeightDp);
         return shortSide > 0 && shortSide <= MAX_COMPACT_SHORT_SIDE_DP
@@ -1075,12 +1702,25 @@ public final class WeChatImeFullscreenHook {
         final int systemUiVisibility;
         final int navigationBarColor;
         final boolean navigationBarContrastEnforced;
+        final View.OnApplyWindowInsetsListener onApplyWindowInsetsListener;
 
         WindowBaseline(int systemUiVisibility, int navigationBarColor,
-                boolean navigationBarContrastEnforced) {
+                boolean navigationBarContrastEnforced,
+                View.OnApplyWindowInsetsListener onApplyWindowInsetsListener) {
             this.systemUiVisibility = systemUiVisibility;
             this.navigationBarColor = navigationBarColor;
             this.navigationBarContrastEnforced = navigationBarContrastEnforced;
+            this.onApplyWindowInsetsListener = onApplyWindowInsetsListener;
+        }
+    }
+
+    private static final class SymbolRowBaseline {
+        final int itemHeight;
+        WeakReference<ViewGroup> list;
+
+        SymbolRowBaseline(int itemHeight, ViewGroup list) {
+            this.itemHeight = itemHeight;
+            this.list = new WeakReference<>(list);
         }
     }
 
@@ -1191,12 +1831,17 @@ public final class WeChatImeFullscreenHook {
         final int lineGapHeight;
         final int height;
         final float translationX;
+        final float density;
+        final int nativeWidth;
+        final int nativeT9Width;
         float appliedScale = -1.0f;
         int appliedWidth = -1;
+        int appliedMetricWidth = -1;
 
         KeyboardBaseline(Object data, String type, List<Float> lineHeight,
                 List<Float> lineGapHeights, List<Integer> lineAlign, float vHeight,
-                int lineGapHeight, int height, float translationX) {
+                int lineGapHeight, int height, float translationX, float density,
+                int nativeWidth, int nativeT9Width) {
             this.data = data;
             this.type = type;
             this.lineHeight = lineHeight;
@@ -1206,7 +1851,11 @@ public final class WeChatImeFullscreenHook {
             this.lineGapHeight = lineGapHeight;
             this.height = height;
             this.translationX = translationX;
+            this.density = density;
+            this.nativeWidth = nativeWidth;
+            this.nativeT9Width = nativeT9Width;
         }
+
     }
 
     private WeChatImeFullscreenHook() {}

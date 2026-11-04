@@ -33,6 +33,8 @@ public final class SettingsActivity extends Activity {
     private TextView countText;
     private MaterialSwitch imeReplacementSwitch;
     private TextView imeReplacementSummary;
+    private MaterialSwitch doubaoReplacementSwitch;
+    private TextView doubaoReplacementSummary;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -107,12 +109,34 @@ public final class SettingsActivity extends Activity {
         imeSection.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(imeSection, marginTop(dp(24)));
         root.addView(createImeReplacementCard(), marginTop(dp(12)));
+        root.addView(createDoubaoReplacementCard(), marginTop(dp(12)));
 
         FrameLayout.LayoutParams navigationParams = new FrameLayout.LayoutParams(
                 -1, dp(80), Gravity.BOTTOM);
         page.addView(AppNavigation.create(this, AppNavigation.WIDGETS), navigationParams);
 
         return page;
+    }
+
+    private View createDoubaoReplacementCard() {
+        MaterialCardView card = card();
+        LinearLayout body = vertical(dp(14));
+        LinearLayout header = horizontal();
+        TextView title = text("豆包输入法替换官方输入法", 17,
+                color(com.google.android.material.R.attr.colorOnSurface));
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        header.addView(title, weighted());
+        doubaoReplacementSwitch = new MaterialSwitch(this);
+        doubaoReplacementSwitch.setContentDescription("豆包输入法替换官方输入法");
+        header.addView(doubaoReplacementSwitch, new LinearLayout.LayoutParams(-2, -2));
+        body.addView(header, matchWrap());
+        doubaoReplacementSummary = text("开启后折叠时使用豆包输入法。", 14,
+                color(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        doubaoReplacementSummary.setPadding(0, dp(5), 0, 0);
+        body.addView(doubaoReplacementSummary, matchWrap());
+        card.addView(body, new FrameLayout.LayoutParams(-1, -2));
+        bindDoubaoReplacementSwitch();
+        return card;
     }
 
     private View createImeReplacementCard() {
@@ -145,9 +169,19 @@ public final class SettingsActivity extends Activity {
         // is opened, including after boot while the cover screen is already folded.
         getContentResolver().notifyChange(ImeScopeStatusProvider.URI, null);
         imeReplacementSwitch.setOnCheckedChangeListener(null);
-        boolean enabled = ImeReplacementSettings.read(this);
+        String target = ImeReplacementSettings.readTarget(this);
+        boolean enabled = ImeReplacementSettings.WECHAT_PACKAGE.equals(target);
         imeReplacementSwitch.setChecked(enabled);
         bindImeReplacementSwitch();
+        if (doubaoReplacementSwitch != null) {
+            doubaoReplacementSwitch.setOnCheckedChangeListener(null);
+            boolean doubao = ImeReplacementSettings.DOUBAO_PACKAGE.equals(target);
+            doubaoReplacementSwitch.setChecked(doubao);
+            doubaoReplacementSummary.setText(doubao
+                    ? "已开启：折叠时使用豆包输入法，展开后恢复原输入法。"
+                    : "开启后折叠时使用豆包输入法。");
+            bindDoubaoReplacementSwitch();
+        }
         if (imeReplacementSummary != null) {
             imeReplacementSummary.setText(buildImeReplacementSummary(
                     enabled, getImeScopeStatus()));
@@ -157,6 +191,16 @@ public final class SettingsActivity extends Activity {
     private void bindImeReplacementSwitch() {
         imeReplacementSwitch.setOnCheckedChangeListener((button, checked) ->
                 setImeReplacementEnabled(checked));
+    }
+
+    private void bindDoubaoReplacementSwitch() {
+        doubaoReplacementSwitch.setOnCheckedChangeListener((button, checked) -> {
+            String target = checked ? ImeReplacementSettings.DOUBAO_PACKAGE : "";
+            if (!ImeReplacementSettings.writeTarget(this, target)) {
+                Toast.makeText(this, "设置未能保存，请重试", Toast.LENGTH_LONG).show();
+            }
+            renderImeReplacementSetting();
+        });
     }
 
     private void setImeReplacementEnabled(boolean enabled) {
@@ -172,6 +216,7 @@ public final class SettingsActivity extends Activity {
                 Toast.makeText(this, "设置未能保存，请重试", Toast.LENGTH_LONG).show();
                 return;
             }
+            renderImeReplacementSetting();
             if (imeReplacementSummary != null) {
                 imeReplacementSummary.setText(buildImeReplacementSummary(
                         enabled, getImeScopeStatus()));

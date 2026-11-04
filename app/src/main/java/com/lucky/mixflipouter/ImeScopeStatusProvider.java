@@ -14,6 +14,7 @@ public final class ImeScopeStatusProvider extends ContentProvider {
     static final Uri URI = Uri.parse("content://com.lucky.mixflipouter.ime-scope");
     private static final String PREFS = "ime_scope_status";
     private static final String REPLACEMENT_ENABLED = "replace_with_wechat";
+    private static final String REPLACEMENT_PACKAGE = "replacement_package";
 
     @Override
     public boolean onCreate() {
@@ -41,8 +42,16 @@ public final class ImeScopeStatusProvider extends ContentProvider {
         if ("set_replacement_status".equals(method)) {
             enforceOwnCaller();
             boolean enabled = extras != null && extras.getBoolean("enabled", false);
+            String target = extras != null && extras.containsKey("target")
+                    ? extras.getString("target", "")
+                    : enabled ? "com.tencent.wetype" : "";
+            if (!target.isEmpty() && !"com.tencent.wetype".equals(target)
+                    && !"com.bytedance.android.doubaoime".equals(target)) {
+                throw new IllegalArgumentException("Unsupported input method");
+            }
             boolean saved = statusPreferences().edit()
-                    .putBoolean(REPLACEMENT_ENABLED, enabled).commit();
+                    .putBoolean(REPLACEMENT_ENABLED, "com.tencent.wetype".equals(target))
+                    .putString(REPLACEMENT_PACKAGE, target).commit();
             if (saved) getContext().getContentResolver().notifyChange(URI, null);
             Bundle result = new Bundle();
             result.putBoolean("saved", saved);
@@ -54,6 +63,8 @@ public final class ImeScopeStatusProvider extends ContentProvider {
             Bundle result = new Bundle();
             result.putBoolean("configured", prefs.contains(REPLACEMENT_ENABLED));
             result.putBoolean("enabled", prefs.getBoolean(REPLACEMENT_ENABLED, false));
+            result.putString("target", prefs.getString(REPLACEMENT_PACKAGE,
+                    prefs.getBoolean(REPLACEMENT_ENABLED, false) ? "com.tencent.wetype" : ""));
             return result;
         }
         return super.call(method, arg, extras);

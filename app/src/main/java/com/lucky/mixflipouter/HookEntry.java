@@ -64,6 +64,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             WeChatImeFullscreenHook.install(param);
             return;
         }
+        if ("com.bytedance.android.doubaoime".equals(param.packageName)) {
+            DoubaoImeFullscreenHook.install(param);
+            return;
+        }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
         try {
             hookMamlCacheSource(param.classLoader);
