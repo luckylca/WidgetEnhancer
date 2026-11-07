@@ -114,12 +114,16 @@ public final class WeChatImeFullscreenHook {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final ThreadLocal<Boolean> APPLYING_KEYBOARD_DATA = new ThreadLocal<>();
     private static String lastObservedKeyboard;
+    private static Boolean savedKeepSymbols;
     private static WeakReference<View> lastActiveKeyboard = new WeakReference<>(null);
+    private static final Map<View, WeakReference<View>> LONG_PRESS_KEYBOARDS =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     static void install(XC_LoadPackage.LoadPackageParam param) {
         if (!"com.tencent.wetype".equals(param.packageName)) return;
         try {
             installScopeReporter();
+            installNormalLongPressAnchor(param.classLoader);
             XposedHelpers.findAndHookMethod(INJECTOR_CLASS, param.classLoader,
                     "isImeSupport", Context.class, new XC_MethodHook() {
                         @Override
@@ -222,6 +226,51 @@ public final class WeChatImeFullscreenHook {
             XposedBridge.log("MixFlipCustom: WeChat compact-display keyboard adaptation enabled");
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat keyboard hook unavailable: " + error);
+        }
+    }
+
+    private static void installNormalLongPressAnchor(ClassLoader loader) {
+        try {
+            XposedHelpers.findAndHookMethod(ViewGroup.class, "addView", View.class,
+                    ViewGroup.LayoutParams.class, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam hook) {
+                    View child = (View) hook.args[0];
+                    if (!child.getClass().getName().matches(
+                            "com\\.tencent\\.wetype\\.plugin\\.hld\\.floatview\\.(A|D|p)")) return;
+                    View keyboard = lastActiveKeyboard.get();
+                    if (keyboard == null || !NORMAL_WIDTH_SCALES.containsKey(keyboard)
+                            || !getKeyboardType(keyboard).contains("Qwerty")
+                            || !(hook.args[1] instanceof android.widget.FrameLayout.LayoutParams)) return;
+                    try {
+                        Object button = XposedHelpers.callMethod(keyboard, "getActionButton");
+                        Rect rect = (Rect) XposedHelpers.callMethod(button, "t");
+                        android.widget.FrameLayout.LayoutParams params =
+                                (android.widget.FrameLayout.LayoutParams) hook.args[1];
+                        int offset = Math.round(rect.exactCenterX() * (1f - keyboard.getScaleX()));
+                        params.leftMargin -= offset;
+                        LONG_PRESS_KEYBOARDS.put(child, new WeakReference<>(keyboard));
+                    } catch (Throwable error) {
+                        XposedBridge.log("MixFlipCustom: float position failed: " + error);
+                    }
+                }
+            });
+            for (String name : new String[]{"y", "p"}) {
+                Class<?> type = XposedHelpers.findClass(
+                        "com.tencent.wetype.plugin.hld.floatview." + name, loader);
+                XposedBridge.hookAllMethods(type, "e", new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam hook) {
+                    WeakReference<View> ref = LONG_PRESS_KEYBOARDS.get(hook.thisObject);
+                    View keyboard = ref == null ? null : ref.get();
+                    if (keyboard == null || !(hook.args[0] instanceof Float)) return;
+                    int[] location = new int[2];
+                    keyboard.getLocationInWindow(location);
+                    float x = (Float) hook.args[0];
+                    hook.args[0] = location[0] + (x - location[0]) * keyboard.getScaleX();
+                }
+            });
+            }
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: long press hook unavailable: " + error);
         }
     }
 
@@ -679,6 +728,7 @@ public final class WeChatImeFullscreenHook {
     private static void adapt(InputMethodService service, View decor, int attempt) {
         View observed = findKeyboard(decor);
         if (observed != null) {
+            updateKeepSymbols(observed, isNormalCover(service) || isCompactCover(service));
             String state = observed.getClass().getName() + "@"
                     + System.identityHashCode(observed) + " type=" + getKeyboardType(observed);
             if (!state.equals(lastObservedKeyboard)) {
@@ -687,7 +737,8 @@ public final class WeChatImeFullscreenHook {
                 lastObservedKeyboard = state;
                 XposedBridge.log("MixFlipCustom: active keyboard " + state);
                 if (previous != null && previous != observed
-                        && isRecreatableKeyboard(previous)) {
+                        && isRecreatableKeyboard(previous)
+                        && isRecreatableKeyboard(observed)) {
                     scheduleInactiveKeyboardDisposal(service, decor, previous, observed);
                 }
             }
@@ -739,6 +790,28 @@ public final class WeChatImeFullscreenHook {
         } catch (Throwable error) {
             XposedBridge.log("MixFlipCustom: WeChat cover layout failed: " + error);
             retry(service, decor, attempt, "layout adaptation failed");
+        }
+    }
+
+    private static void updateKeepSymbols(View keyboard, boolean cover) {
+        try {
+            Class<?> action = XposedHelpers.findClass("com.tencent.wetype.plugin.hld.key.d",
+                    keyboard.getClass().getClassLoader());
+            String type = getKeyboardType(keyboard);
+            boolean symbols = cover && ("ChineseNumberSymbols".equals(type)
+                    || "EnglishNumberSymbols".equals(type) || "Number".equals(type)
+                    || "Symbols".equals(type));
+            if (symbols) {
+                if (savedKeepSymbols == null) {
+                    savedKeepSymbols = XposedHelpers.getStaticBooleanField(action, "e");
+                }
+                XposedHelpers.setStaticBooleanField(action, "e", true);
+            } else if (!symbols && savedKeepSymbols != null) {
+                XposedHelpers.setStaticBooleanField(action, "e", savedKeepSymbols);
+                savedKeepSymbols = null;
+            }
+        } catch (Throwable error) {
+            XposedBridge.log("MixFlipCustom: keep symbols open failed: " + error);
         }
     }
 
@@ -795,7 +868,7 @@ public final class WeChatImeFullscreenHook {
         compactT9MetricWidth = 0;
         disableNativeWidthHooks();
         try {
-            if (qwerty) {
+            if (qwerty || "Symbols".equals(getKeyboardType(keyboard))) {
                 restoreNormalKeyRects(keyboard);
                 fitNormalKeyboardWidth(keyboard);
                 if (candidate != null) alignNormalKeyboardBottom(decor, candidate, keyboard);
