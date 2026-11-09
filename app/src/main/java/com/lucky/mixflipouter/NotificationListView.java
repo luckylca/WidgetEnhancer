@@ -2,6 +2,7 @@ package com.lucky.mixflipouter;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
@@ -55,6 +56,7 @@ final class NotificationListView extends FrameLayout {
     private float downX;
     private float downY;
     private boolean swiping;
+    private NotificationTheme.Palette notificationPalette;
 
     NotificationListView(Context context, boolean interactive, int maxRows,
                          int filterMode, List<String> filterPackages) {
@@ -64,6 +66,8 @@ final class NotificationListView extends FrameLayout {
         this.filterMode = WidgetConfig.clampNotificationFilterMode(filterMode);
         this.filterPackages = filterPackages == null
                 ? new HashSet<>() : new HashSet<>(filterPackages);
+        notificationPalette = NotificationTheme.fromConfiguration(
+                context.getResources().getConfiguration());
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         rowContainer = new LinearLayout(context);
         rowContainer.setOrientation(LinearLayout.VERTICAL);
@@ -78,34 +82,33 @@ final class NotificationListView extends FrameLayout {
         }
         emptyView = new TextView(context);
         emptyView.setText("暂无通知");
-        emptyView.setTextColor(WallpaperColorState.secondaryTextColor());
+        emptyView.setTextColor(notificationPalette.auxiliary);
         emptyView.setGravity(Gravity.CENTER);
         emptyView.setSingleLine(true);
         emptyView.setEllipsize(TextUtils.TruncateAt.END);
         emptyView.setVisibility(GONE);
         addView(emptyView, new LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        applyNotificationTheme(notificationPalette);
         setClickable(interactive);
     }
 
-    private final WallpaperColorState.Listener wallpaperColorListener =
-            new WallpaperColorState.Listener() {
-                @Override
-                public void onWallpaperColorChanged(boolean darkWallpaper) {
-                    emptyView.setTextColor(WallpaperColorState.secondaryTextColor());
-                }
-            };
-
     @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        WallpaperColorState.addListener(wallpaperColorListener);
+    protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        updateSystemTheme(newConfig);
     }
 
-    @Override
-    protected void onDetachedFromWindow() {
-        WallpaperColorState.removeListener(wallpaperColorListener);
-        super.onDetachedFromWindow();
+    void updateSystemTheme(Configuration configuration) {
+        NotificationTheme.Palette next = NotificationTheme.fromConfiguration(configuration);
+        if (notificationPalette == next) return;
+        applyNotificationTheme(next);
+    }
+
+    private void applyNotificationTheme(NotificationTheme.Palette palette) {
+        notificationPalette = palette;
+        emptyView.setTextColor(palette.auxiliary);
+        for (RowView row : rows) row.applyTheme(palette);
     }
 
     void setCallback(Callback value) {
@@ -144,6 +147,14 @@ final class NotificationListView extends FrameLayout {
     float debugActiveOffset() {
         return activeRow == null ? Float.NaN : activeRow.getSwipeOffset();
     }
+
+    int debugCardColor(int rowIndex) { return rows[rowIndex].cardBackground.getColor().getDefaultColor(); }
+
+    int debugTitleColor(int rowIndex) { return rows[rowIndex].title.getCurrentTextColor(); }
+
+    int debugContentColor(int rowIndex) { return rows[rowIndex].content.getCurrentTextColor(); }
+
+    int debugEmptyTextColor() { return emptyView.getCurrentTextColor(); }
 
     private void applyData(Bundle data) {
         long revision = data.getLong("revision", -1);
@@ -346,10 +357,13 @@ final class NotificationListView extends FrameLayout {
             card.addView(textColumn, new FrameLayout.LayoutParams(
                     LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
             textColumn.setTag("textColumn");
-            // Capsule keeps the fixed light-card look: white background, dark text.
-            cardBackground.setColor(0xFFFFFFFF);
-            title.setTextColor(0xFF1A1A1A);
-            content.setTextColor(0x991A1A1A);
+            applyTheme(notificationPalette);
+        }
+
+        void applyTheme(NotificationTheme.Palette palette) {
+            cardBackground.setColor(palette.cardBackground);
+            title.setTextColor(palette.title);
+            content.setTextColor(palette.content);
         }
 
         void bind(String rowKey, String packageName, String titleText, String contentText,

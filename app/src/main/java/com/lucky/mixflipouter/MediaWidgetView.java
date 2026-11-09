@@ -5,6 +5,7 @@ import android.app.Instrumentation;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -327,8 +328,8 @@ final class MediaWidgetView extends FrameLayout {
         try {
             Bundle result = getContext().getContentResolver().call(
                     Contract.PROVIDER_URI, method, key, null);
-            android.util.Log.i("MixFlipCustom", "notification action " + method
-                    + " ok=" + (result != null && result.getBoolean("ok")));
+            ModuleLogger.logFeatureState("notification action", result != null
+                    && result.getBoolean("ok") ? "SUCCESS" : "FAILED", method);
             if (result != null && !result.getBoolean("ok")) {
                 String message = result.getString("message", "");
                 if (!message.isEmpty()) {
@@ -336,6 +337,7 @@ final class MediaWidgetView extends FrameLayout {
                 }
             }
         } catch (Throwable error) {
+            ModuleLogger.logException("Notification action failed", error);
             Toast.makeText(getContext(), "通知操作失败：" + error.getMessage(),
                     Toast.LENGTH_SHORT).show();
         }
@@ -990,6 +992,12 @@ final class MediaWidgetView extends FrameLayout {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         updateLayerLayouts(width, height);
         invalidateOutline();
+    }
+
+    @Override
+    protected void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (notificationList != null) notificationList.updateSystemTheme(newConfig);
     }
 
     @Override
