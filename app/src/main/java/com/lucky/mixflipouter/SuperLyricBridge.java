@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.RemoteException;
-import android.util.Log;
 
 import com.hchen.superlyricapi.ISuperLyricReceiver;
 import com.hchen.superlyricapi.SuperLyricData;
@@ -34,7 +33,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   here — those are 3.5 and must not be reintroduced without a version gate.
  */
 final class SuperLyricBridge {
-    private static final String TAG = "MixFlipSuperLyric";
     private static final String SUPERLYRIC_PACKAGE = "com.hchen.superlyric";
     private static final long RETRY_SECONDS = 8;
 
@@ -65,7 +63,7 @@ final class SuperLyricBridge {
             try {
                 EXECUTOR.execute(() -> accept(publisher, data));
             } catch (Throwable error) {
-                Log.w(TAG, "Unable to queue lyric update", error);
+                ModuleLogger.logExceptionThrottled("Unable to queue SuperLyric update", error);
             }
         }
 
@@ -74,7 +72,7 @@ final class SuperLyricBridge {
             try {
                 EXECUTOR.execute(() -> stop(publisher));
             } catch (Throwable error) {
-                Log.w(TAG, "Unable to queue lyric stop", error);
+                ModuleLogger.logExceptionThrottled("Unable to queue SuperLyric stop event", error);
             }
         }
     };
@@ -90,11 +88,11 @@ final class SuperLyricBridge {
         localApiVersion = safeLocalApiVersion();
         installed = packageInstalled(appContext);
         if (!SuperLyricCompat.shouldConnect(localApiVersion)) {
-            connectionMessage = "API 版本不兼容，已停用 SuperLyric 接收";
+            setConnectionMessage("API 版本不匹配，SuperLyric 接收已停用", "DISABLED");
             return;
         }
         if (!STARTED.compareAndSet(false, true)) return;
-        connectionMessage = "正在检查 SuperLyric 服务";
+        setConnectionMessage("正在检查 SuperLyric 服务", "CONNECTING");
         connectionTask = EXECUTOR.scheduleWithFixedDelay(SuperLyricBridge::connectOnce,
                 0, RETRY_SECONDS, TimeUnit.SECONDS);
     }
@@ -129,35 +127,41 @@ final class SuperLyricBridge {
                 if (task != null) task.cancel(false);
                 receiverRegistered = false;
                 serviceAvailable = false;
-                connectionMessage = "API 版本不兼容，已停用 SuperLyric 接收";
+                setConnectionMessage("API 版本不匹配，SuperLyric 接收已停用", "DISABLED");
                 return;
             }
             installed = packageInstalled(context);
             serviceAvailable = safeIsAvailable();
             if (!serviceAvailable) {
                 receiverRegistered = false;
-                connectionMessage = installed
-                        ? "SuperLyric 已安装，但系统服务不可用"
-                        : "未安装 SuperLyric";
+                setConnectionMessage(installed ? "SuperLyric 已安装，但系统服务不可用"
+                        : "未安装 SuperLyric", installed ? "UNAVAILABLE" : "MISSING");
                 return;
             }
             if (!safeIsRegistered()) {
                 try {
                     SuperLyricHelper.registerReceiver(RECEIVER);
                 } catch (Throwable error) {
-                    Log.w(TAG, "Receiver registration failed", error);
+                    ModuleLogger.logException("SuperLyric receiver registration failed", error);
                 }
             }
             receiverRegistered = safeIsRegistered();
-            connectionMessage = receiverRegistered
+            setConnectionMessage(receiverRegistered
                     ? "接收器已注册（API " + SuperLyricCompat.SUPPORTED_API_LABEL + "）"
-                    : "SuperLyric 服务可用，正在注册歌词接收器";
+                    : "SuperLyric 服务可用，正在注册歌词接收器",
+                    receiverRegistered ? "CONNECTED" : "CONNECTING");
         } catch (Throwable error) {
             serviceAvailable = false;
             receiverRegistered = false;
-            connectionMessage = "SuperLyric 服务暂不可用";
-            Log.w(TAG, "SuperLyric connection check failed", error);
+            setConnectionMessage("SuperLyric 服务暂不可用", "UNAVAILABLE");
+            ModuleLogger.logExceptionThrottled("SuperLyric Binder connection check failed", error);
         }
+    }
+
+    private static void setConnectionMessage(String message, String state) {
+        if (message == null || message.equals(connectionMessage)) return;
+        connectionMessage = message;
+        ModuleLogger.logFeatureState("SuperLyric Binder connection", state, message);
     }
 
     private static void accept(String publisher, SuperLyricData data) {
@@ -195,15 +199,14 @@ final class SuperLyricBridge {
                     Contract.PROVIDER_URI, "publish_superlyric_internal", null,
                     toBundle(normalized));
             if (result == null || !result.getBoolean("ok")) {
-                String reason = result == null
-                        ? "provider unavailable" : result.getString("message", "rejected");
-                Log.i(TAG, "Lyric update held: " + reason);
+                ModuleLogger.warnThrottled("superlyric-update-held",
+                        "SuperLyric update was held by the local provider", 30_000L);
                 return;
             }
             lastPublisher = normalized.track.publisherPackage;
             lastReceivedAt = System.currentTimeMillis();
         } catch (Throwable error) {
-            Log.w(TAG, "Lyric update failed", error);
+            ModuleLogger.logExceptionThrottled("SuperLyric update failed", error);
         }
     }
 
@@ -224,7 +227,7 @@ final class SuperLyricBridge {
             }
             lastStopAt = System.currentTimeMillis();
         } catch (Throwable error) {
-            Log.w(TAG, "Lyric stop event failed", error);
+            ModuleLogger.logExceptionThrottled("SuperLyric stop event failed", error);
         }
     }
 

@@ -14,6 +14,7 @@ import org.json.JSONTokener;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,7 +37,7 @@ final class CourseScheduleHook {
     private static volatile String lastSnapshot = "";
     private static volatile String lastWebSnapshot = "";
 
-    static void install(XC_LoadPackage.LoadPackageParam param) {
+    static void install(XC_LoadPackage.LoadPackageParam param) throws Throwable {
         if (!Contract.VOICE_ASSIST_PACKAGE.equals(param.packageName)
                 || !INSTALLED.compareAndSet(false, true)) return;
         try {
@@ -56,7 +57,7 @@ final class CourseScheduleHook {
                     });
         } catch (Throwable error) {
             INSTALLED.set(false);
-            XposedBridge.log("MixFlipCustom: XiaoAi course hook attach failed: " + error);
+            throw error;
         }
     }
 
@@ -72,9 +73,13 @@ final class CourseScheduleHook {
                 new Handler(Looper.getMainLooper()).postDelayed(
                         () -> syncFromLocalCache(helper), 1_000L);
             }
-            XposedBridge.log("MixFlipCustom: XiaoAi local course data hooks installed");
+            ModuleLogger.info("XiaoAi in-memory course hooks registered");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi course data hook unavailable: " + error);
+            ModuleLogger.logHookFailure("XiaoAi course schedule", HELPER,
+                    "handleCourseEntity / buildWeekTableCourseData / buildDayTableCourseData",
+                    "course entity and local table", error);
+            ModuleLogger.logFeatureState("XiaoAi course schedule", "PARTIAL",
+                    "课程表内部 API 不完整");
         }
         if (loadLocalCache) installWebScheduleHooks(loader);
     }
@@ -97,7 +102,7 @@ final class CourseScheduleHook {
                 }
             }
         };
-        boolean installed = false;
+        int installed = 0;
         try {
             Class<?> commonWebView = XposedHelpers.findClass(
                     "com.xiaomi.voiceassistant.commonweb.CommonWebView", loader);
@@ -105,10 +110,10 @@ final class CourseScheduleHook {
                     "com.xiaomi.voiceassistant.web.container.AiWebActivity$c", loader);
             XposedHelpers.findAndHookMethod(pageListener, "onPageFinished",
                     commonWebView, readAfterPageLoad);
-            installed = true;
-            XposedBridge.log("MixFlipCustom: XiaoAi H5 page-finished hook attached");
+            installed++;
+            ModuleLogger.debug("XiaoAi H5 page-finished hook registered");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi H5 page hook unavailable: " + error);
+            ModuleLogger.logException("XiaoAi H5 page-finished hook unavailable", error);
         }
         try {
             XposedHelpers.findAndHookMethod(WebView.class, "loadUrl",
@@ -121,15 +126,15 @@ final class CourseScheduleHook {
                             }
                         }
                     });
-            installed = true;
-            XposedBridge.log("MixFlipCustom: XiaoAi base WebView load hook attached");
+            installed++;
+            ModuleLogger.debug("XiaoAi WebView load hook registered");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi WebView load hook unavailable: " + error);
+            ModuleLogger.logException("XiaoAi WebView load hook unavailable", error);
         }
         try {
             Class<?> commonWebView = XposedHelpers.findClass(
                     "com.xiaomi.voiceassistant.commonweb.CommonWebView", loader);
-            XposedBridge.hookAllMethods(commonWebView, "loadUrl", new XC_MethodHook() {
+            Set<?> hooks = XposedBridge.hookAllMethods(commonWebView, "loadUrl", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam hook) {
                     String url = hook.args.length > 0 ? string(hook.args[0]) : "";
@@ -138,13 +143,14 @@ final class CourseScheduleHook {
                     }
                 }
             });
-            installed = true;
+            if (hooks.isEmpty()) throw new IllegalStateException("CommonWebView.loadUrl missing");
+            installed++;
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi CommonWebView load hook unavailable: " + error);
+            ModuleLogger.logException("XiaoAi CommonWebView load hook unavailable", error);
         }
-        if (installed) {
-            XposedBridge.log("MixFlipCustom: XiaoAi H5 course storage hook installed");
-        }
+        ModuleLogger.logFeatureState("XiaoAi H5 course storage", installed == 3 ? "SUCCESS"
+                : installed > 0 ? "PARTIAL" : "FAILED",
+                installed + "/3 WebView page-load hooks registered");
     }
 
     private static boolean isCourseScheduleUrl(String url) {
@@ -176,7 +182,7 @@ final class CourseScheduleHook {
                 }
             });
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi H5 schedule read failed: " + error);
+            ModuleLogger.logExceptionThrottled("XiaoAi H5 course schedule read failed", error);
         }
     }
 
@@ -249,16 +255,16 @@ final class CourseScheduleHook {
                 try {
                     Bundle result = context.getContentResolver().call(Contract.PROVIDER_URI,
                             "publish_course_schedule", null, payload);
-                    XposedBridge.log("MixFlipCustom: XiaoAi H5 schedule published, source="
-                            + finalSourceCount + ", usable=" + finalCourses.length()
-                            + ", week=" + finalCurrentWeek + ", accepted="
-                            + (result != null && result.getBoolean("ok")));
+                    ModuleLogger.logFeatureState("XiaoAi H5 course schedule",
+                            result != null && result.getBoolean("ok") ? "SUCCESS" : "FAILED",
+                            "received=" + finalSourceCount + ", usable=" + finalCourses.length()
+                                    + ", week=" + finalCurrentWeek);
                 } catch (Throwable error) {
-                    XposedBridge.log("MixFlipCustom: XiaoAi H5 schedule publish failed: " + error);
+                    ModuleLogger.logException("XiaoAi H5 schedule publication failed", error);
                 }
             }, "mixflip-course-h5-publish").start();
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi H5 schedule parse failed: " + error);
+            ModuleLogger.logException("XiaoAi H5 course schedule parsing failed", error);
         }
     }
 
@@ -301,12 +307,13 @@ final class CourseScheduleHook {
         try {
             Object helper = findHelperSingleton(helperClass);
             if (helper == null) {
-                XposedBridge.log("MixFlipCustom: XiaoAi helper singleton was not found");
+                ModuleLogger.logHookSkipped("XiaoAi course schedule", HELPER,
+                        "localCache", "helper singleton was not found");
                 return;
             }
             Object raw = XposedHelpers.callMethod(helper, "isThereCacheData");
             if (!(raw instanceof String) || ((String) raw).trim().isEmpty()) {
-                XposedBridge.log("MixFlipCustom: XiaoAi has no cached local course table yet");
+                ModuleLogger.info("XiaoAi has no cached local course table yet");
                 return;
             }
             ClassLoader loader = helperClass.getClassLoader();
@@ -323,7 +330,7 @@ final class CourseScheduleHook {
             }
             publishSnapshot(helper);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: XiaoAi local cache read failed: " + error);
+            ModuleLogger.logException("XiaoAi local course cache read failed", error);
         }
     }
 
@@ -347,7 +354,7 @@ final class CourseScheduleHook {
                 try {
                     publishSnapshot(hook.thisObject);
                 } catch (Throwable error) {
-                    XposedBridge.log("MixFlipCustom: XiaoAi course snapshot failed: " + error);
+                    ModuleLogger.logException("XiaoAi course snapshot failed", error);
                 }
             }
         };
@@ -389,11 +396,12 @@ final class CourseScheduleHook {
             try {
                 Bundle result = context.getContentResolver().call(Contract.PROVIDER_URI,
                         "publish_course_schedule", null, payload);
-                XposedBridge.log("MixFlipCustom: XiaoAi course snapshot published, courses="
-                        + (result == null ? -1 : result.getInt("course_count", -1))
-                        + ", week=" + currentWeek);
+                ModuleLogger.logFeatureState("XiaoAi course schedule",
+                        result != null && result.getBoolean("ok") ? "SUCCESS" : "FAILED",
+                        "courseCount=" + (result == null ? -1 : result.getInt("course_count", -1))
+                                + ", week=" + currentWeek);
             } catch (Throwable error) {
-                XposedBridge.log("MixFlipCustom: XiaoAi course publish failed: " + error);
+                ModuleLogger.logException("XiaoAi course snapshot publication failed", error);
             }
         }, "mixflip-course-publish").start();
     }

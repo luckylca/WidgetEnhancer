@@ -49,7 +49,7 @@ final class LiveRefreshBridge {
                     });
             installed = true;
             report("live_refresh", true, "配置观察器已注册");
-            XposedBridge.log("MixFlipCustom: live config observer installed");
+            ModuleLogger.info("Live configuration observer installed");
         }
     }
 
@@ -77,11 +77,11 @@ final class LiveRefreshBridge {
             int refreshedHosts = refreshRuntimeHosts(activeContext);
             refreshOpenSettings();
             report("live_refresh", true, "配置已即时刷新，重建 " + refreshedHosts + " 个运行时页面");
-            XposedBridge.log("MixFlipCustom: live configuration refresh completed, runtime hosts="
-                    + refreshedHosts);
+            ModuleLogger.logFeatureState("Live widget refresh", "SUCCESS",
+                    "runtime hosts rebuilt=" + refreshedHosts);
         } catch (Throwable error) {
             report("live_refresh", false, "即时刷新失败：" + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: live refresh failed: " + error);
+            ModuleLogger.logException("Live widget configuration refresh failed", error);
         }
     }
 

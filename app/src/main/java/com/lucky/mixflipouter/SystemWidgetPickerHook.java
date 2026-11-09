@@ -20,7 +20,6 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /** Bridges the MIUI Personal Assistant picker selection back to the editor. */
@@ -38,13 +37,17 @@ final class SystemWidgetPickerHook {
     private static volatile String pendingRequest;
     private static volatile boolean selectionInProgress;
 
-    static void installAssistantPicker(ClassLoader loader) {
-        hookPickerLifecycle(loader);
-        hookSelectionAction(loader);
-        android.util.Log.i("MixFlipCustom", "MIUI Assistant widget picker hooks installed");
+    static boolean installAssistantPicker(ClassLoader loader) {
+        boolean lifecycle = hookPickerLifecycle(loader);
+        boolean selection = hookSelectionAction(loader);
+        int installed = (lifecycle ? 1 : 0) + (selection ? 1 : 0);
+        ModuleLogger.logFeatureState("System widget picker", installed == 2 ? "SUCCESS"
+                : installed == 1 ? "PARTIAL" : "FAILED",
+                installed + "/2 picker hook groups registered");
+        return installed == 2;
     }
 
-    private static void hookPickerLifecycle(ClassLoader loader) {
+    private static boolean hookPickerLifecycle(ClassLoader loader) {
         try {
             Class<?> picker = XposedHelpers.findClass(PICKER_ACTIVITY, loader);
             XposedHelpers.findAndHookMethod(picker, "onCreate", Bundle.class,
@@ -72,10 +75,12 @@ final class SystemWidgetPickerHook {
                             if (!selectionInProgress) pendingRequest = null;
                         }
                     });
-            android.util.Log.i("MixFlipCustom", "Assistant picker lifecycle hook installed");
+            ModuleLogger.info("Assistant picker lifecycle hook registered");
+            return true;
         } catch (Throwable error) {
-            android.util.Log.e("MixFlipCustom", "Assistant picker lifecycle hook failed", error);
-            XposedBridge.log("MixFlipCustom: Assistant picker lifecycle hook failed: " + error);
+            ModuleLogger.logHookFailure("Assistant picker lifecycle", PICKER_ACTIVITY,
+                    "onCreate / onNewIntent / onDestroy", "Activity lifecycle", error);
+            return false;
         }
     }
 
@@ -87,10 +92,10 @@ final class SystemWidgetPickerHook {
         pendingRequest = request;
         intent.removeExtra(Contract.EXTRA_SYSTEM_WIDGET_PICK_REQUEST);
         activity.setIntent(intent);
-        android.util.Log.i("MixFlipCustom", "received selection request in MIUI Assistant picker");
+        ModuleLogger.info("System widget picker selection request received");
     }
 
-    private static void hookSelectionAction(ClassLoader loader) {
+    private static boolean hookSelectionAction(ClassLoader loader) {
         try {
             Class<?> controller = XposedHelpers.findClass(ADD_ACTION_CONTROLLER, loader);
             Class<?> itemInfo = XposedHelpers.findClass(ITEM_INFO, loader);
@@ -107,8 +112,7 @@ final class SystemWidgetPickerHook {
 
                             View view = (View) hook.args[0];
                             Object item = hook.args[1];
-                            android.util.Log.i("MixFlipCustom", "picker add action received: "
-                                    + (item == null ? "null" : item.getClass().getName()));
+                            ModuleLogger.debug("System widget picker item selected");
                             if (item != null && MAML_ITEM_INFO.equals(item.getClass().getName())) {
                                 beginMamlSelection(view, request, item);
                                 hook.setResult(false);
@@ -148,15 +152,16 @@ final class SystemWidgetPickerHook {
                             }
                             Activity activity = findActivity(view.getContext());
                             if (activity != null) activity.finish();
-                            android.util.Log.i("MixFlipCustom", "returned widget selection: "
-                                    + provider.flattenToString());
+                            ModuleLogger.info("System widget selection returned to module");
                             hook.setResult(true);
                         }
                     });
-            android.util.Log.i("MixFlipCustom", "Assistant picker add action hook installed");
+            ModuleLogger.info("Assistant picker selection hook registered");
+            return true;
         } catch (Throwable error) {
-            android.util.Log.e("MixFlipCustom", "Assistant picker add action hook failed", error);
-            XposedBridge.log("MixFlipCustom: Assistant picker selection hook failed: " + error);
+            ModuleLogger.logHookFailure("Assistant picker selection", ADD_ACTION_CONTROLLER,
+                    "addWidgetOrMaMl", "View / ItemInfo / boolean", error);
+            return false;
         }
     }
 
@@ -167,6 +172,7 @@ final class SystemWidgetPickerHook {
             Object info = XposedHelpers.getObjectField(item, "providerInfo");
             return info instanceof AppWidgetProviderInfo ? (AppWidgetProviderInfo) info : null;
         } catch (Throwable ignored) {
+            ModuleLogger.debug("Optional AppWidget item metadata unavailable");
             return null;
         }
     }
@@ -211,12 +217,11 @@ final class SystemWidgetPickerHook {
                     }
                 }
                 if (!delivered) {
-                    XposedBridge.log("MixFlipCustom: MAML selection rejected: " + errorMessage);
+                    ModuleLogger.warn("MAML widget selection was rejected by the module provider");
                 }
             } catch (Throwable error) {
                 errorMessage = error.getMessage() == null ? errorMessage : error.getMessage();
-                android.util.Log.e("MixFlipCustom", "MAML selection transfer failed", error);
-                XposedBridge.log("MixFlipCustom: MAML selection transfer failed: " + error);
+                ModuleLogger.logException("MAML selection transfer failed", error);
             }
             if (temporaryArchive && archive != null) archive.delete();
             final boolean resultDelivered = delivered;
@@ -225,8 +230,7 @@ final class SystemWidgetPickerHook {
                 selectionInProgress = false;
                 if (resultDelivered) {
                     pendingRequest = null;
-                    android.util.Log.i("MixFlipCustom", "returned MAML widget selection: "
-                            + selectedName);
+                    ModuleLogger.info("MAML widget selection returned to module");
                     if (activity != null && !activity.isFinishing()) activity.finish();
                 } else {
                     pendingRequest = request;
@@ -293,8 +297,7 @@ final class SystemWidgetPickerHook {
             generated.delete();
             throw new IllegalArgumentException("小米小部件资源包过大");
         }
-        android.util.Log.i("MixFlipCustom", "packed extracted MAML resources from "
-                + canonicalRoot.getAbsolutePath());
+        ModuleLogger.debug("Packed extracted MAML resources into a temporary archive");
         return new MamlArchive(generated, true);
     }
 
@@ -401,15 +404,11 @@ final class SystemWidgetPickerHook {
             if (!delivered) {
                 String message = result == null ? "empty provider response"
                         : result.getString("message", "request rejected");
-                android.util.Log.e("MixFlipCustom", "system widget selection rejected: "
-                        + message);
-                XposedBridge.log("MixFlipCustom: system widget selection rejected: " + message);
+                ModuleLogger.warn("System widget selection delivery rejected: " + message);
             }
             return delivered;
         } catch (Throwable error) {
-            android.util.Log.e("MixFlipCustom", "system widget selection delivery failed", error);
-            XposedBridge.log("MixFlipCustom: system widget selection delivery failed: "
-                    + error);
+            ModuleLogger.logException("System widget selection delivery failed", error);
             return false;
         }
     }

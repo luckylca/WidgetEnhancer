@@ -11,7 +11,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.net.Uri;
-import android.util.Log;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 
@@ -131,7 +130,7 @@ final class CourseScheduleWidgetView extends View {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(intent);
         } catch (Throwable failure) {
-            Log.w("MixFlipCustom", "Unable to open XiaoAi course schedule", failure);
+            ModuleLogger.logException("Unable to open XiaoAi course schedule", failure);
         }
     }
 

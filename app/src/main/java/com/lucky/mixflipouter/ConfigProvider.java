@@ -15,6 +15,8 @@ import android.os.Binder;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.provider.Settings;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -29,9 +31,12 @@ public final class ConfigProvider extends ContentProvider {
     private String torchCameraId;
     private volatile boolean torchOn;
     private volatile boolean torchKnown;
+    private File logFallbackDirectory;
 
     @Override
     public boolean onCreate() {
+        android.content.Context deviceContext = getContext().createDeviceProtectedStorageContext();
+        logFallbackDirectory = new File(deviceContext.getFilesDir(), "log_fallback");
         repository = new WidgetRepository(getContext());
         lyricsProvider = new LyricsStateStore(getContext());
         qsTileBridge = new QSTileBridgeStore(getContext());
@@ -46,6 +51,33 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
         if ("get_health".equals(method)) return getHealth();
+        if ("append_logger_fallback".equals(method)) return appendLoggerFallback(extras);
+        if ("read_logger_fallback".equals(method)) {
+            enforceOwnCaller();
+            return runFallbackOperation(() -> LogFallbackStore.peek(logFallbackDirectory,
+                    extras == null ? 512 * 1024 : extras.getInt("maxBytes", 512 * 1024)));
+        }
+        if ("ack_logger_fallback".equals(method)) {
+            enforceOwnCaller();
+            return runFallbackOperation(() -> {
+                JSONArray values = new JSONArray(extras == null ? "[]"
+                        : extras.getString("eventIds", "[]"));
+                java.util.Set<String> ids = new java.util.HashSet<>();
+                for (int i = 0; i < values.length(); i++) ids.add(values.optString(i));
+                return LogFallbackStore.acknowledge(logFallbackDirectory, ids);
+            });
+        }
+        if ("get_logger_fallback_stats".equals(method)) {
+            enforceOwnCaller();
+            return runFallbackOperation(() -> LogFallbackStore.stats(logFallbackDirectory));
+        }
+        if ("record_logger_loss".equals(method)) {
+            enforceLoggerCallerIdentity(extras == null ? "" : extras.getString("packageName", ""),
+                    extras == null ? "" : extras.getString("processName", ""));
+            return runFallbackOperation(() -> LogFallbackStore.recordLoss(logFallbackDirectory,
+                    extras == null ? "unspecified" : extras.getString("reason", "unspecified"),
+                    extras == null ? 0 : extras.getLong("count", 0)));
+        }
         if ("publish_qs_tiles".equals(method)) {
             enforceSystemUiCaller();
             Bundle result = qsTileBridge.publish(extras);
@@ -178,6 +210,99 @@ public final class ConfigProvider extends ContentProvider {
         }
         return super.call(method, arg, extras);
     }
+
+    private Bundle appendLoggerFallback(Bundle extras) {
+        try {
+            String encoded = extras == null ? "[]" : extras.getString("events", "[]");
+            enforceLoggerCaller(encoded);
+            JSONArray values = new JSONArray(encoded);
+            if (values.length() > 64) throw new IllegalArgumentException("Fallback batch too large");
+            java.util.List<String> lines = new java.util.ArrayList<>(values.length());
+            for (int i = 0; i < values.length(); i++) {
+                JSONObject event = values.getJSONObject(i);
+                lines.add(event.toString());
+            }
+            String reason = extras == null ? "transport_unavailable"
+                    : extras.getString("reason", "transport_unavailable");
+            return fallbackResponse(LogFallbackStore.append(logFallbackDirectory, lines, reason));
+        } catch (Throwable error) {
+            throw new IllegalArgumentException("Cannot persist logger fallback", error);
+        }
+    }
+
+    private void enforceLoggerCaller(String encodedEvents) {
+        int uid = Binder.getCallingUid();
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        String caller = null;
+        try { caller = getCallingPackage(); } catch (Throwable ignored) { }
+        String actual = readCallerProcessName(Binder.getCallingPid());
+        try {
+            JSONArray rows = new JSONArray(encodedEvents);
+            if (rows.length() == 0 || rows.length() > 64) {
+                throw new SecurityException("Empty or oversized fallback batch");
+            }
+            boolean loggerForwarder = uid == android.os.Process.myUid()
+                    && "com.lucky.mixflipouter:logger".equals(actual);
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.getJSONObject(i);
+                if (loggerForwarder) {
+                    LogCallerIdentity.validateForwarded(uid, actual,
+                            row.optString("packageName", ""), row.optString("processName", ""));
+                } else {
+                    enforceLoggerCallerIdentity(uid, packages, caller, actual,
+                            row.optString("packageName", ""), row.optString("processName", ""));
+                }
+            }
+        } catch (SecurityException error) {
+            throw error;
+        } catch (Throwable error) {
+            throw new SecurityException("Malformed fallback batch", error);
+        }
+    }
+
+    private void enforceLoggerCallerIdentity(String claimed, String process) {
+        int uid = Binder.getCallingUid();
+        String[] packages = getContext().getPackageManager().getPackagesForUid(uid);
+        String caller = null;
+        try { caller = getCallingPackage(); } catch (Throwable ignored) { }
+        enforceLoggerCallerIdentity(uid, packages, caller, readCallerProcessName(Binder.getCallingPid()),
+                claimed, process);
+    }
+
+    private void enforceLoggerCallerIdentity(int uid, String[] packages, String caller,
+                                             String actual, String claimed, String process) {
+        LogCallerIdentity.validate(uid, packages, caller, actual, claimed, process);
+    }
+
+    private String readCallerProcessName(int pid) {
+        if (pid <= 0) return null;
+        try (java.io.FileInputStream input = new java.io.FileInputStream(
+                "/proc/" + pid + "/cmdline")) {
+            byte[] bytes = new byte[256];
+            int count = input.read(bytes);
+            if (count <= 0) return null;
+            int length = 0;
+            while (length < count && bytes[length] != 0) length++;
+            return new String(bytes, 0, length, java.nio.charset.StandardCharsets.UTF_8).trim();
+        } catch (Throwable ignored) { return null; }
+    }
+
+    private Bundle fallbackResponse(JSONObject value) {
+        Bundle result = new Bundle();
+        result.putString("fallback", value.toString());
+        result.putBoolean("accepted", value.optBoolean("accepted", true));
+        result.putLong("pendingCount", value.optLong("pendingCount", 0));
+        return result;
+    }
+
+    private Bundle runFallbackOperation(FallbackOperation operation) {
+        try { return fallbackResponse(operation.run()); }
+        catch (Throwable error) {
+            throw new IllegalStateException("Cannot access persistent log fallback", error);
+        }
+    }
+
+    private interface FallbackOperation { JSONObject run() throws Exception; }
 
     private Bundle getWidget(String widgetId) {
         if (repository.isSafeMode()) return null;

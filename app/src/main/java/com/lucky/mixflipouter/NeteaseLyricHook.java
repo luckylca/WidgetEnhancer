@@ -16,6 +16,7 @@ import android.os.SystemClock;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.XC_MethodHook;
@@ -43,6 +44,7 @@ final class NeteaseLyricHook {
     private static final AtomicBoolean LOAD_CALLBACK_SEEN = new AtomicBoolean();
     private static final AtomicBoolean TIMER_CALLBACK_SEEN = new AtomicBoolean();
     private static final AtomicBoolean STATUS_REQUEST_IN_FLIGHT = new AtomicBoolean();
+    private static volatile boolean installComplete;
     private static long lastRequestedMusicId;
     private static long lastPublishedMusicId;
     private static long lastStatusRequestElapsed;
@@ -75,19 +77,23 @@ final class NeteaseLyricHook {
         }
     };
 
-    static void install(ClassLoader loader) {
-        if (!INSTALLED.compareAndSet(false, true)) return;
-        installServiceAttachHook();
-
+    static boolean install(ClassLoader loader) {
+        if (!INSTALLED.compareAndSet(false, true)) return installComplete;
         ArrayList<String> installed = new ArrayList<>();
         ArrayList<String> failures = new ArrayList<>();
+        if (!installServiceAttachHook()) failures.add("service-attach=not registered");
         Class<?> infoClass;
         try {
             infoClass = XposedHelpers.findClass(INFO_CLASS, loader);
         } catch (Throwable error) {
+            INSTALLED.set(false);
             reportWhenReady(false, "网易云歌词模型不兼容：" + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: NetEase lyric model unavailable: " + error);
-            return;
+            ModuleLogger.logHookFailure("NetEase lyric fallback", INFO_CLASS,
+                    "<loadClass>", "lyric model", error);
+            ModuleLogger.logFeatureState("NetEase lyric fallback", "FAILED",
+                    "lyric model unavailable");
+            installComplete = false;
+            return false;
         }
 
         hookLoader(loader, infoClass, installed, failures);
@@ -95,20 +101,27 @@ final class NeteaseLyricHook {
         hookStatusController(loader, installed, failures);
 
         boolean ok = !installed.isEmpty();
+        installComplete = ok && failures.isEmpty();
         String message = ok
                 ? "网易云歌词入口已匹配：" + String.join(" + ", installed)
                 : "网易云歌词入口不兼容：" + String.join(" / ", failures);
         reportWhenReady(ok, message);
-        XposedBridge.log("MixFlipCustom: NetEase lyric adapter "
-                + (ok ? "installed: " + String.join(",", installed)
-                : "failed: " + String.join(",", failures)));
+        ModuleLogger.logFeatureState("NetEase lyric fallback", !ok ? "FAILED"
+                        : installComplete ? "SUCCESS" : "PARTIAL",
+                "registered=" + String.join(",", installed)
+                        + (failures.isEmpty() ? "" : "; unavailable="
+                        + String.join(",", failures)));
+        if (!ok) {
+            INSTALLED.set(false);
+        }
+        return installComplete;
     }
 
     /** NetEase can replace its base ClassLoader with Tinker after the package hook runs. */
-    private static void installServiceAttachHook() {
-        if (!SERVICE_ATTACH_HOOK_INSTALLED.compareAndSet(false, true)) return;
+    private static boolean installServiceAttachHook() {
+        if (!SERVICE_ATTACH_HOOK_INSTALLED.compareAndSet(false, true)) return true;
         try {
-            XposedBridge.hookAllMethods(Service.class, "attach", new XC_MethodHook() {
+            Set<?> hooks = XposedBridge.hookAllMethods(Service.class, "attach", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam hook) {
                     Object service = hook.thisObject;
@@ -117,8 +130,12 @@ final class NeteaseLyricHook {
                     attachRuntimePlayService(service);
                 }
             });
+            if (hooks.isEmpty()) throw new IllegalStateException("Service.attach hook target missing");
+            return true;
         } catch (Throwable error) {
+            SERVICE_ATTACH_HOOK_INSTALLED.set(false);
             logError("NetEase service attach hook failed", error);
+            return false;
         }
     }
 
@@ -135,10 +152,11 @@ final class NeteaseLyricHook {
                 hookConsumer(loader, infoClass, installed, failures);
                 hookPlayService(controllerClass, lyricLoaderClass,
                         service.getClass(), installed, failures);
-                XposedBridge.log("MixFlipCustom: NetEase runtime lyric adapter installed: "
-                        + String.join(",", installed));
+                ModuleLogger.logFeatureState("NetEase runtime lyric adapter",
+                        installed.isEmpty() ? "FAILED" : failures.isEmpty() ? "SUCCESS" : "PARTIAL",
+                        "registered=" + String.join(",", installed));
                 if (!failures.isEmpty()) {
-                    XposedBridge.log("MixFlipCustom: NetEase runtime lyric adapter warnings: "
+                    ModuleLogger.warn("NetEase runtime lyric adapter warnings: "
                             + String.join(" / ", failures));
                 }
             }
@@ -165,7 +183,8 @@ final class NeteaseLyricHook {
             installed.add("loader");
         } catch (Throwable error) {
             failures.add("loader=" + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: NetEase loader hook failed: " + error);
+            ModuleLogger.logHookFailure("NetEase lyric loader", LOADER_CLASS, "o0",
+                    "LyricInfo / boolean", error);
         }
     }
 
@@ -176,7 +195,8 @@ final class NeteaseLyricHook {
             consumerClass = XposedHelpers.findClass(CONSUMER_CLASS, loader);
         } catch (Throwable error) {
             failures.add("consumer=" + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: NetEase consumer class unavailable: " + error);
+            ModuleLogger.logHookFailure("NetEase lyric consumer", CONSUMER_CLASS,
+                    "onLrcLoaded / onLrcTimerUpdate", "consumer callbacks", error);
             return;
         }
 
@@ -186,7 +206,7 @@ final class NeteaseLyricHook {
                         @Override
                         protected void afterHookedMethod(MethodHookParam hook) {
                             if (LOAD_CALLBACK_SEEN.compareAndSet(false, true)) {
-                                XposedBridge.log("MixFlipCustom: NetEase onLrcLoaded callback observed");
+                                ModuleLogger.info("NetEase lyric load callback observed");
                             }
                             schedulePublish(hook.args[0], "netease-consumer");
                         }
@@ -194,7 +214,8 @@ final class NeteaseLyricHook {
             installed.add("consumer-load");
         } catch (Throwable error) {
             failures.add("consumer-load=" + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: NetEase consumer load hook failed: " + error);
+            ModuleLogger.logHookFailure("NetEase lyric consumer load", CONSUMER_CLASS,
+                    "onLrcLoaded", "LyricInfo", error);
         }
 
         try {
@@ -203,7 +224,7 @@ final class NeteaseLyricHook {
                         @Override
                         protected void afterHookedMethod(MethodHookParam hook) {
                             if (TIMER_CALLBACK_SEEN.compareAndSet(false, true)) {
-                                XposedBridge.log("MixFlipCustom: NetEase lyric timer callback observed");
+                                ModuleLogger.info("NetEase lyric timer callback observed");
                             }
                             Object info = XposedHelpers.getObjectField(
                                     hook.thisObject, "mLyricInfo");
@@ -213,7 +234,8 @@ final class NeteaseLyricHook {
             installed.add("consumer-timer");
         } catch (Throwable error) {
             failures.add("consumer-timer=" + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: NetEase consumer timer hook failed: " + error);
+            ModuleLogger.logHookFailure("NetEase lyric timer consumer", CONSUMER_CLASS,
+                    "onLrcTimerUpdate", "int / long", error);
         }
     }
 
@@ -226,7 +248,6 @@ final class NeteaseLyricHook {
             Class<?> serviceClass = XposedHelpers.findClass(PLAY_SERVICE_CLASS, loader);
             hookPlayService(controllerClass, lyricLoaderClass, serviceClass,
                     installed, failures);
-            installed.add("status-driver");
         } catch (Throwable error) {
             failures.add("status-driver=" + error.getClass().getSimpleName());
             logError("NetEase status driver hook failed", error);
@@ -327,11 +348,17 @@ final class NeteaseLyricHook {
                     }
                 }
             };
-            XposedBridge.hookAllMethods(
+            Set<?> primary = XposedBridge.hookAllMethods(
                     serviceClass, "sendMusicInfoToClient", musicInfoHook);
-            XposedBridge.hookAllMethods(
+            Set<?> specified = XposedBridge.hookAllMethods(
                     serviceClass, "sendSpecifiedMusicInfoToClient", musicInfoHook);
+            if (primary.isEmpty() && specified.isEmpty()) {
+                throw new IllegalStateException("No music-info hook targets found");
+            }
             installed.add("music-info");
+            if (primary.isEmpty() || specified.isEmpty()) {
+                failures.add("music-info=partial target coverage");
+            }
         } catch (Throwable error) {
             failures.add("music-info=" + error.getClass().getSimpleName());
             logError("NetEase music info hook failed", error);
@@ -446,7 +473,8 @@ final class NeteaseLyricHook {
             request = XposedHelpers.callMethod(request, "m", false);
             request = XposedHelpers.callMethod(request, "o", false);
             XposedHelpers.callMethod(request, "k");
-            XposedBridge.log("MixFlipCustom: NetEase status lyric consumer activated");
+            ModuleLogger.logFeatureState("NetEase status lyric consumer", "SUCCESS",
+                    "status lyrics request was activated");
             return true;
         } catch (Throwable error) {
             logError("NetEase status consumer activation failed", error);
@@ -457,12 +485,7 @@ final class NeteaseLyricHook {
     }
 
     private static void logError(String message, Throwable error) {
-        Throwable cause = error;
-        while (cause.getCause() != null && cause.getCause() != cause) {
-            cause = cause.getCause();
-        }
-        XposedBridge.log("MixFlipCustom: " + message + ": " + cause);
-        XposedBridge.log(cause);
+        ModuleLogger.logExceptionThrottled(message, error);
     }
 
     private static void schedulePublish(Object lyricInfo, String source) {
@@ -485,7 +508,7 @@ final class NeteaseLyricHook {
             }
             new Thread(() -> send(payload, key), "mixflip-lyric-publish").start();
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: lyric extraction failed: " + error);
+            ModuleLogger.logExceptionThrottled("NetEase lyric metadata extraction failed", error);
         }
     }
 
@@ -544,13 +567,13 @@ final class NeteaseLyricHook {
                                     lastPublishedMusicId = payload.getLong("music_id", 0);
                                 }
                             }
-                            XposedBridge.log(
-                                    "MixFlipCustom: published NetEase lyric timing, lines=" + count);
+                            ModuleLogger.logFeatureState("NetEase lyric publication", "SUCCESS",
+                                    "lineCount=" + count);
                         } else {
                             Bundle result = getResultExtras(false);
                             String message = result == null ? ""
                                     : result.getString("message", "");
-                            XposedBridge.log("MixFlipCustom: lyric bridge rejected publication"
+                            ModuleLogger.warn("NetEase lyric publication was rejected"
                                     + (message.isEmpty() ? "" : ": " + message));
                         }
                     } finally {
@@ -560,7 +583,7 @@ final class NeteaseLyricHook {
             };
             sendOrderedBridge(context, intent, resultReceiver);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: lyric publish failed: " + error);
+            ModuleLogger.logException("NetEase lyric publication failed", error);
             SEND_IN_FLIGHT.set(false);
         }
     }
@@ -580,7 +603,7 @@ final class NeteaseLyricHook {
                         }
                     });
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: NetEase health report hook failed: " + error);
+            ModuleLogger.logException("NetEase health report hook unavailable", error);
         }
     }
 
@@ -601,7 +624,7 @@ final class NeteaseLyricHook {
                     });
         } catch (Throwable error) {
             REPORT_SENT.set(false);
-            XposedBridge.log("MixFlipCustom: NetEase health report failed: " + error);
+            ModuleLogger.logException("NetEase health report delivery failed", error);
         }
     }
 

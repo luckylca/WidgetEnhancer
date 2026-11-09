@@ -47,12 +47,17 @@ android {
     namespace 'com.lucky.mixflipouter'
     compileSdk 36
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId 'com.lucky.mixflipouter'
         minSdk 30
         targetSdk 36
-        versionCode 35
-        versionName '0.9.11'
+        versionCode 37
+        versionName '0.9.13'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
     signingConfigs {
@@ -101,4 +106,6 @@ dependencies {
     implementation 'com.github.HChenX:SuperLyricApi:3.4'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
+    androidTestImplementation 'androidx.test:runner:1.5.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
 }

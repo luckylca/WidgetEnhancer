@@ -1,7 +1,6 @@
 package com.lucky.mixflipouter;
 
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
@@ -18,7 +17,7 @@ public final class AppWidgetBindHook {
             "com.android.server.appwidget.AppWidgetServiceImpl$SecurityPolicy";
     private static final String CHECK_METHOD = "hasCallerBindPermissionOrBindWhiteListedLocked";
 
-    static void install(ClassLoader loader) {
+    static void install(ClassLoader loader) throws Throwable {
         try {
             XposedHelpers.findAndHookMethod(POLICY_CLASS, loader, CHECK_METHOD,
                     String.class, new XC_MethodHook() {
@@ -29,9 +28,9 @@ public final class AppWidgetBindHook {
                             }
                         }
                     });
-            XposedBridge.log("MixFlipCustom: AppWidget bind consent bypass installed");
+            ModuleLogger.info("AppWidget bind consent hook registered");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: appwidget bind hook unavailable: " + error);
+            throw error;
         }
     }
 

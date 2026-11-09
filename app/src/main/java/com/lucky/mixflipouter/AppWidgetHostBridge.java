@@ -8,7 +8,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.util.Log;
 
 import java.util.HashSet;
 import java.util.List;
@@ -20,7 +19,6 @@ import java.util.Set;
  * shared AppWidgetHost, id allocation and orphan cleanup.
  */
 final class AppWidgetHostBridge {
-    private static final String TAG = "MixFlipCustom";
     private static final int HOST_ID = 0x4d495446; // "MIFT"
     private static final String PREFS = "mixflip_appwidget_host";
     private static final String KEY_ALLOCATED = "allocated_ids";
@@ -41,9 +39,9 @@ final class AppWidgetHostBridge {
             host = new AppWidgetHost(appContext, HOST_ID);
             try {
                 host.startListening();
-                Log.i(TAG, "AppWidget host started in FlipHome");
+                ModuleLogger.info("AppWidget host started in FlipHome");
             } catch (Throwable error) {
-                Log.w(TAG, "AppWidget host startListening failed", error);
+                ModuleLogger.logException("AppWidget host startListening failed", error);
             }
             trackActivities(appContext);
         }
@@ -69,7 +67,7 @@ final class AppWidgetHostBridge {
                         @Override public void onActivityDestroyed(android.app.Activity a) {}
                     });
         } catch (Throwable error) {
-            Log.w(TAG, "activity tracking failed", error);
+            ModuleLogger.logException("AppWidget host activity tracking failed", error);
         }
     }
 
@@ -93,7 +91,7 @@ final class AppWidgetHostBridge {
                 remember(id);
                 return id;
             } catch (Throwable error) {
-                Log.w(TAG, "allocateAppWidgetId failed", error);
+                ModuleLogger.logException("AppWidget ID allocation failed", error);
                 return -1;
             }
         }
@@ -105,7 +103,7 @@ final class AppWidgetHostBridge {
             try {
                 return manager.bindAppWidgetIdIfAllowed(appWidgetId, provider);
             } catch (Throwable error) {
-                Log.w(TAG, "bindAppWidgetIdIfAllowed failed", error);
+                ModuleLogger.logException("AppWidget binding request failed", error);
                 return false;
             }
         }
@@ -116,7 +114,8 @@ final class AppWidgetHostBridge {
             if (manager == null || appWidgetId < 0) return null;
             try {
                 return manager.getAppWidgetInfo(appWidgetId);
-            } catch (Throwable ignored) {
+            } catch (Throwable error) {
+                ModuleLogger.logException("AppWidget metadata lookup failed", error);
                 return null;
             }
         }
@@ -128,7 +127,7 @@ final class AppWidgetHostBridge {
             try {
                 return host.createView(appContext, appWidgetId, info);
             } catch (Throwable error) {
-                Log.w(TAG, "createView failed for id " + appWidgetId, error);
+                ModuleLogger.logException("AppWidget host view creation failed", error);
                 return null;
             }
         }
@@ -144,7 +143,8 @@ final class AppWidgetHostBridge {
             options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
             try {
                 manager.updateAppWidgetOptions(appWidgetId, options);
-            } catch (Throwable ignored) {
+            } catch (Throwable error) {
+                ModuleLogger.logException("AppWidget options update failed", error);
             }
         }
     }
@@ -154,7 +154,8 @@ final class AppWidgetHostBridge {
             if (host == null || appWidgetId < 0) return;
             try {
                 host.deleteAppWidgetId(appWidgetId);
-            } catch (Throwable ignored) {
+            } catch (Throwable error) {
+                ModuleLogger.logException("AppWidget ID cleanup failed", error);
             }
             forget(appWidgetId);
         }
@@ -184,8 +185,9 @@ final class AppWidgetHostBridge {
                 if (live.contains(id)) continue;
                 try {
                     host.deleteAppWidgetId(id);
-                    Log.i(TAG, "Released orphan AppWidget id " + id);
-                } catch (Throwable ignored) {
+                    ModuleLogger.info("Released orphan AppWidget allocation");
+                } catch (Throwable error) {
+                    ModuleLogger.logException("Orphan AppWidget release failed", error);
                 }
                 forget(id);
             }

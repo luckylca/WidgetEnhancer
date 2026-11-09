@@ -28,7 +28,7 @@ final class WidgetLimitHook {
         hookSettingsAdapters(loader, widgetItem);
         hookPersistence(loader);
         installed = true;
-        XposedBridge.log("MixFlipCustom: unlimited widget pages hook installed");
+        ModuleLogger.info("Unlimited widget page hooks registered");
     }
 
     private static void hookViewModel(ClassLoader loader, Class<?> viewModel, Class<?> widgetItem) {

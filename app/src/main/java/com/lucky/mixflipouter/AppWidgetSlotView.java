@@ -11,7 +11,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.widget.FrameLayout;
@@ -25,7 +24,6 @@ import java.util.List;
  * flow and swapping the placeholder for the real AppWidgetHostView.
  */
 final class AppWidgetSlotView extends FrameLayout {
-    private static final String TAG = "MixFlipCustom";
     private static final long BIND_WATCH_INTERVAL_MS = 2_000L;
     private static final int REQUEST_BIND_CONSENT = 0x4d49;
     /** FlipHome's launcher_widget_radius; matches native outer-screen widgets. */
@@ -70,7 +68,7 @@ final class AppWidgetSlotView extends FrameLayout {
             // sitting on the placeholder forever.
             if (++nullInfoTicks >= 15) {
                 nullInfoTicks = 0;
-                Log.i(TAG, "AppWidget id " + component.appWidgetId + " never bound; re-allocating");
+                ModuleLogger.warn("AppWidget provider metadata remained unavailable; reallocating host id");
                 resetAndReallocate();
                 return;
             }
@@ -127,7 +125,7 @@ final class AppWidgetSlotView extends FrameLayout {
                 return result.getInt("app_widget_id", appWidgetId);
             }
         } catch (Throwable error) {
-            Log.w(TAG, "report appWidgetId failed", error);
+            ModuleLogger.logException("AppWidget ID report failed", error);
         }
         return -1;
     }
@@ -145,7 +143,7 @@ final class AppWidgetSlotView extends FrameLayout {
                         Contract.PROVIDER_URI, "set_appwidget_id", widgetId, extras);
                 component.appWidgetId = -1;
             } catch (Throwable error) {
-                Log.w(TAG, "reset appWidgetId failed", error);
+                ModuleLogger.logException("AppWidget ID reset failed", error);
             }
             mainHandler.post(() -> {
                 preparing = false;
@@ -158,7 +156,8 @@ final class AppWidgetSlotView extends FrameLayout {
         try {
             List<WidgetConfig> configs = WidgetConfig.list(getContext());
             AppWidgetHostBridge.reconcile(configs);
-        } catch (Throwable ignored) {
+        } catch (Throwable error) {
+            ModuleLogger.logException("AppWidget host reconciliation failed", error);
         }
     }
 
@@ -236,9 +235,8 @@ final class AppWidgetSlotView extends FrameLayout {
         }
         applyTransform();
         applySizeOptions();
-        Log.i(TAG, "AppWidget attached: " + info.provider + " id=" + component.appWidgetId
-                + " natural=" + naturalWidthDp + "x" + naturalHeightDp
-                + "dp cellsWide=" + naturalCellsWide + " corner=" + component.cornerEnabled);
+        ModuleLogger.info("AppWidget provider attached: " + info.provider.getPackageName()
+                + " naturalSizeDp=" + naturalWidthDp + "x" + naturalHeightDp);
         return true;
     }
 
@@ -345,7 +343,7 @@ final class AppWidgetSlotView extends FrameLayout {
                 getContext().getApplicationContext().startActivity(intent);
             }
         } catch (Throwable error) {
-            Log.w(TAG, "launch bind consent failed", error);
+            ModuleLogger.logException("AppWidget binding consent launch failed", error);
             showPlaceholder("授权页打开失败\n请在主屏添加一次该小部件");
         }
     }

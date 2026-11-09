@@ -6,11 +6,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
-import android.util.Log;
 
 /** Package-visibility-safe bridge from the hooked NetEase process to the private provider API. */
 public final class NeteaseLyricsReceiver extends BroadcastReceiver {
-    private static final String TAG = "MixFlipLyrics";
     static final String ACTION_PUBLISH =
             "com.lucky.mixflipouter.action.PUBLISH_NETEASE_LYRICS";
     static final String ACTION_REPORT =
@@ -59,7 +57,8 @@ public final class NeteaseLyricsReceiver extends BroadcastReceiver {
         result.putString("message", message);
         setResultExtras(result);
         setResultCode(Activity.RESULT_CANCELED);
-        Log.w(TAG, message);
+        ModuleLogger.warnThrottled("netease-lyric-bridge-rejected",
+                "NetEase lyric bridge request rejected: " + message, 5000L);
     }
 
     private boolean trustedSender(Context context) {

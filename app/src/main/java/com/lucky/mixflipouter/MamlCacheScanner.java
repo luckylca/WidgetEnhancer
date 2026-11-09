@@ -3,7 +3,6 @@ package com.lucky.mixflipouter;
 import android.content.Context;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
-import android.util.Log;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -64,11 +63,11 @@ final class MamlCacheScanner {
                     if (known != null && known.getBoolean("known")) continue;
                     publish(sourceContext, candidate);
                 } catch (Throwable error) {
-                    Log.w(TAG, "MAML cache sync failed for " + candidate.name, error);
+                    ModuleLogger.logExceptionThrottled("MAML cache package synchronization failed", error);
                 }
             }
         } catch (Throwable error) {
-            Log.w(TAG, "MAML cache scan failed", error);
+            ModuleLogger.logException("MAML cache scan failed", error);
         }
     }
 

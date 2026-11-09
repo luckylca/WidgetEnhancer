@@ -1,7 +1,6 @@
 package com.lucky.mixflipouter;
 
 import android.content.Context;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -18,7 +17,6 @@ import java.io.InputStream;
  * exactly like a built-in one.
  */
 final class MamlSlotView extends FrameLayout {
-    private static final String TAG = "MixFlipCustom";
     private static final String COMPAT_CLASS =
             "com.miui.fliphome.widget.ui.maml.FlipMaMlWidgetCompat";
     private static final String HOST_VIEW_CLASS =
@@ -50,7 +48,7 @@ final class MamlSlotView extends FrameLayout {
                             LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
                 });
             } catch (Throwable error) {
-                Log.w(TAG, "MAML slot failed", error);
+                ModuleLogger.logException("MAML widget slot initialization failed", error);
                 post(() -> showPlaceholder("小部件加载失败"));
             }
         }, "mixflip-maml-slot").start();

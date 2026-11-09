@@ -12,6 +12,7 @@ import org.json.JSONObject;
 
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.Set;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -36,16 +37,16 @@ final class SystemUiTileHook {
     private static boolean publishScheduled;
     private static boolean publishing;
 
-    static void install(ClassLoader loader) {
+    static void install(ClassLoader loader) throws Throwable {
         try {
             Class<?> hostClass = XposedHelpers.findClass(HOST, loader);
-            XposedBridge.hookAllConstructors(hostClass, new XC_MethodHook() {
+            Set<?> constructors = XposedBridge.hookAllConstructors(hostClass, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam hook) {
                     attach(hook.thisObject);
                 }
             });
-            XposedBridge.hookAllMethods(hostClass, "getTiles", new XC_MethodHook() {
+            Set<?> getTiles = XposedBridge.hookAllMethods(hostClass, "getTiles", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam hook) {
                     host = hook.thisObject;
@@ -53,15 +54,23 @@ final class SystemUiTileHook {
                 }
             });
             Class<?> tileClass = XposedHelpers.findClass(TILE_IMPL, loader);
-            XposedBridge.hookAllMethods(tileClass, "refreshState", new XC_MethodHook() {
+            Set<?> refreshState = XposedBridge.hookAllMethods(tileClass, "refreshState", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam hook) {
                     schedulePublish(250);
                 }
             });
-            XposedBridge.log("MixFlipCustom: SystemUI QS adapter hooks installed");
+            int registered = (constructors.isEmpty() ? 0 : 1)
+                    + (getTiles.isEmpty() ? 0 : 1) + (refreshState.isEmpty() ? 0 : 1);
+            ModuleLogger.logFeatureState("SystemUI quick-settings hooks",
+                    registered == 3 ? "SUCCESS" : registered > 0 ? "PARTIAL" : "FAILED",
+                    registered + "/3 hook groups registered");
+            if (registered != 3) {
+                throw new IllegalStateException(registered + "/3 quick-settings hook groups registered");
+            }
+            ModuleLogger.info("SystemUI quick-settings hooks registered");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: SystemUI QS adapter failed: " + error);
+            throw error;
         }
     }
 
@@ -152,7 +161,8 @@ final class SystemUiTileHook {
         nextPublishAttempt = now + FAILURE_BACKOFF_MS;
         if (now - lastFailureLog < FAILURE_BACKOFF_MS) return;
         lastFailureLog = now;
-        XposedBridge.log("MixFlipCustom: " + message + (error == null ? "" : ": " + error));
+        if (error == null) ModuleLogger.warn(message);
+        else ModuleLogger.logExceptionThrottled(message, error);
     }
 
     private static JSONObject describe(Object tile) {
@@ -172,7 +182,7 @@ final class SystemUiTileHook {
                     .put("custom", spec.startsWith("custom("))
                     .put("implementation", tile.getClass().getName());
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: cannot describe QS tile: " + error);
+            ModuleLogger.logExceptionThrottled("Unable to describe a SystemUI tile", error);
             return null;
         }
     }
@@ -185,7 +195,7 @@ final class SystemUiTileHook {
             request = currentContext.getContentResolver().call(
                     Contract.PROVIDER_URI, "take_qs_request", null, null);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: cannot take QS request: " + error);
+            ModuleLogger.logException("Unable to receive a quick-settings request", error);
             return;
         }
         if (request == null || !request.getBoolean("has_request")) return;
@@ -210,12 +220,13 @@ final class SystemUiTileHook {
             result.putBoolean("ok", false);
             result.putString("message", error.getMessage() == null
                     ? error.getClass().getSimpleName() : error.getMessage());
+            ModuleLogger.logException("SystemUI quick-settings action failed", error);
         }
         try {
             currentContext.getContentResolver().call(
                     Contract.PROVIDER_URI, "complete_qs_request", null, result);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: cannot complete QS request: " + error);
+            ModuleLogger.logException("Unable to publish quick-settings action result", error);
         }
     }
 

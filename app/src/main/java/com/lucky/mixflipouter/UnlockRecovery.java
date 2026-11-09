@@ -8,7 +8,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.UserManager;
 
-import de.robv.android.xposed.XposedBridge;
 
 /**
  * During direct boot (before the first unlock) the module provider is not
@@ -38,16 +37,16 @@ final class UnlockRecovery {
                         target.unregisterReceiver(this);
                     } catch (Throwable ignored) {
                     }
-                    XposedBridge.log("MixFlipCustom: user unlocked, replaying widget injection");
+                    ModuleLogger.info("User unlocked; replaying widget injection");
                     retry(context, loader, 0);
                 }
             }, new IntentFilter(Intent.ACTION_USER_UNLOCKED));
-            XposedBridge.log("MixFlipCustom: unlock recovery armed");
+            ModuleLogger.info("Direct-boot unlock recovery armed");
         } catch (Throwable error) {
             synchronized (LOCK) {
                 armed = false;
             }
-            XposedBridge.log("MixFlipCustom: unlock recovery arm failed: " + error);
+            ModuleLogger.logException("Direct-boot unlock recovery setup failed", error);
         }
     }
 
@@ -58,13 +57,13 @@ final class UnlockRecovery {
                 LiveRefreshBridge.install(context, loader);
                 LiveRefreshBridge.refreshNow();
                 int injected = WidgetConfig.list(context).size();
-                XposedBridge.log("MixFlipCustom: unlock recovery pass " + (attempt + 1)
-                        + ", configs=" + injected);
+                ModuleLogger.logFeatureState("Direct-boot widget recovery", "SUCCESS",
+                        "pass=" + (attempt + 1) + ", configurations=" + injected);
                 if (injected == 0 && attempt + 1 < RETRY_DELAYS_MS.length) {
                     retry(context, loader, attempt + 1);
                 }
             } catch (Throwable error) {
-                XposedBridge.log("MixFlipCustom: unlock recovery failed: " + error);
+                ModuleLogger.logException("Direct-boot widget recovery failed", error);
                 if (attempt + 1 < RETRY_DELAYS_MS.length) retry(context, loader, attempt + 1);
             }
         }, RETRY_DELAYS_MS[attempt]);
