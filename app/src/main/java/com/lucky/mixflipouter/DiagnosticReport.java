@@ -22,7 +22,7 @@ import java.util.TreeMap;
 
 /** Builds a bounded diagnostics snapshot without user content, identifiers or file paths. */
 final class DiagnosticReport {
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
     private static final String[] HOOK_STAGES = {
             "compatibility", "catalogue", "runtime", "live_refresh", "lyrics", "qs"
     };
@@ -34,6 +34,14 @@ final class DiagnosticReport {
         Bundle playback = call(context, "get_playback_state");
         Bundle lyrics = call(context, "get_lyrics_state");
         Bundle qs = call(context, "get_qs_tiles");
+        ModuleLogger.flush(5000L);
+        callLogger(context, "flush", null);
+        Bundle processes = callLogger(context, "get_process_status", null);
+        Bundle hookEvents = callLogger(context, "get_hook_status", null);
+        Bundle logFiles = callLogger(context, "get_log_files", null);
+        Bundle logStats = callLogger(context, "get_queue_stats", null);
+        Bundle imeScopes = callIme(context, "get_scope_status");
+        Bundle imeReplacement = callIme(context, "get_replacement_status");
 
         JSONObject report = new JSONObject();
         report.put("format", "mixflip-diagnostics");
@@ -49,6 +57,10 @@ final class DiagnosticReport {
         report.put("device", device(context));
         report.put("permissions", permissions(context));
         report.put("packages", packages(context));
+        report.put("moduleProcesses", parseArray(processes, "processes"));
+        report.put("hookStatus", parseArray(hookEvents, "hooks"));
+        report.put("runtimeLogging", loggingSummary(logFiles, logStats, imeScopes,
+                imeReplacement));
         JSONObject hooks = summarizeHooks(health);
         report.put("environment", environment(context, hooks));
         report.put("hooks", hooks);
@@ -58,6 +70,46 @@ final class DiagnosticReport {
         report.put("lyrics", summarizeLyrics(lyrics));
         report.put("quickSettings", summarizeQuickSettings(qs));
         return report;
+    }
+
+    private static JSONArray parseArray(Bundle bundle, String key) {
+        if (bundle == null) return new JSONArray();
+        try { return new JSONArray(bundle.getString(key, "[]")); }
+        catch (Throwable ignored) { return new JSONArray(); }
+    }
+
+    private static JSONObject loggingSummary(Bundle files, Bundle stats, Bundle scopes,
+                                             Bundle replacement) throws Exception {
+        return new JSONObject()
+                .put("providerAvailable", files != null)
+                .put("fileList", parseArray(files, "files"))
+                .put("dropped", stats == null ? -1 : stats.getLong("dropped", 0))
+                .put("writeFailures", stats == null ? -1 : stats.getLong("writeFailures", 0))
+                .put("queueOverflows", stats == null ? -1 : stats.getLong("overflowCount", 0))
+                .put("clientQueueDrops", stats == null ? -1 : stats.getLong("clientQueueDrops", 0))
+                .put("fallbackPending", stats == null ? -1 : stats.getLong("fallbackPending", 0))
+                .put("fallbackPendingBytes", stats == null ? -1
+                        : stats.getLong("fallbackPendingBytes", 0))
+                .put("fallbackLossCount", stats == null ? -1
+                        : stats.getLong("fallbackLossCount", 0))
+                .put("fallbackLastLossReason", stats == null ? ""
+                        : stats.getString("fallbackLastLossReason", ""))
+                .put("imeScopeProviderAvailable", scopes != null)
+                .put("imeReplacementProviderAvailable", replacement != null)
+                .put("imeScopeSystemThisBoot", scopes == null ? JSONObject.NULL
+                        : scopes.getBoolean("system"))
+                .put("imeScopeWeChatThisBoot", scopes == null ? JSONObject.NULL
+                        : scopes.getBoolean("wechat"))
+                .put("imeScopeDoubaoThisBoot", scopes == null ? JSONObject.NULL
+                        : scopes.getBoolean("doubao"))
+                .put("imeScopeBootCountKnown", scopes == null ? JSONObject.NULL
+                        : scopes.getBoolean("bootCountKnown"))
+                .put("imeReplacementConfigured", replacement == null ? JSONObject.NULL
+                        : replacement.getBoolean("configured"))
+                .put("imeReplacementEnabled", replacement == null ? JSONObject.NULL
+                        : replacement.getBoolean("enabled"))
+                .put("imeReplacementPackage", replacement == null ? JSONObject.NULL
+                        : replacement.getString("target", ""));
     }
 
     static JSONObject summarizeWidgets(List<WidgetConfig> widgets, long revision,
@@ -120,6 +172,7 @@ final class DiagnosticReport {
                 .put("androidRelease", Build.VERSION.RELEASE)
                 .put("sdk", Build.VERSION.SDK_INT)
                 .put("buildDisplay", Build.DISPLAY)
+                .put("hyperOsVersion", ModuleLogger.hyperOsBuild())
                 .put("userUnlocked", users == null || users.isUserUnlocked());
     }
 
@@ -143,8 +196,14 @@ final class DiagnosticReport {
     private static JSONObject packages(Context context) throws Exception {
         return new JSONObject()
                 .put("flipHome", packageInfo(context, Contract.TARGET_PACKAGE))
+                .put("wechatIme", packageInfo(context, "com.tencent.wetype"))
+                .put("doubaoIme", packageInfo(context, "com.bytedance.android.doubaoime"))
                 .put("systemUi", packageInfo(context, Contract.SYSTEM_UI_PACKAGE))
-                .put("netease", packageInfo(context, Contract.NETEASE_PACKAGE));
+                .put("assistant", packageInfo(context, Contract.VOICE_ASSIST_PACKAGE))
+                .put("launcher", packageInfo(context, Contract.MAML_CACHE_PACKAGE))
+                .put("personalAssistant", packageInfo(context, Contract.PERSONAL_ASSISTANT_PACKAGE))
+                .put("netease", packageInfo(context, Contract.NETEASE_PACKAGE))
+                .put("superLyric", packageInfo(context, "com.hchen.superlyric"));
     }
 
     private static JSONObject environment(Context context, JSONObject hooks) throws Exception {
@@ -275,6 +334,27 @@ final class DiagnosticReport {
         try {
             return context.getContentResolver().call(Contract.PROVIDER_URI, method, null, null);
         } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Bundle callIme(Context context, String method) {
+        try {
+            Bundle result = context.getContentResolver().call(
+                    ImeScopeStatusProvider.URI, method, null, null);
+            if (result == null) ModuleLogger.warn("IME diagnostics returned no data: " + method);
+            return result;
+        } catch (Throwable error) {
+            ModuleLogger.logException("IME diagnostics provider call failed: " + method, error);
+            return null;
+        }
+    }
+
+    private static Bundle callLogger(Context context, String method, Bundle extras) {
+        try {
+            return context.getContentResolver().call(LogProvider.URI, method, null, extras);
+        } catch (Throwable error) {
+            ModuleLogger.logException("Diagnostics log provider call failed: " + method, error);
             return null;
         }
     }

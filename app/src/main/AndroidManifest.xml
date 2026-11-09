@@ -17,6 +17,10 @@
         <package android:name="com.miui.voiceassist" />
         <package android:name="com.netease.cloudmusic" />
         <package android:name="com.hchen.superlyric" />
+        <package android:name="com.tencent.wetype" />
+        <package android:name="com.bytedance.android.doubaoime" />
+        <package android:name="com.android.systemui" />
+        <package android:name="com.miui.personalassistant" />
     </queries>
 
     <application
@@ -84,6 +88,24 @@
             android:authorities="com.lucky.mixflipouter.ime-scope"
             android:directBootAware="true"
             android:exported="true" />
+
+        <provider
+            android:name=".LogProvider"
+            android:authorities="com.lucky.mixflipouter.logs"
+            android:process=":logger"
+            android:directBootAware="true"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/log_export_paths" />
+        </provider>
 
         <service
             android:name=".PlaybackNotificationListener"
