@@ -36,10 +36,15 @@ final class DoubaoImeFullscreenHook {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, Boolean> OBSERVED_DECORS =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<InputMethodService, Boolean> WINDOW_VISIBLE_STATES =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static volatile String lastToolbarFailureClass = "";
+    private static volatile String lastWindowFailureClass = "";
+    private static volatile Boolean lastCoverWindow;
     private static final String TOOLBAR_CLASS =
             "com.bytedance.common_biz.tool_bar.view.views.CandidateToolbarHostLayout";
 
-    static void install(XC_LoadPackage.LoadPackageParam param) {
+    static void install(XC_LoadPackage.LoadPackageParam param) throws Throwable {
         if (!"com.bytedance.android.doubaoime".equals(param.packageName)
                 || !param.packageName.equals(param.processName)) return;
         try {
@@ -55,6 +60,7 @@ final class DoubaoImeFullscreenHook {
                         @Override
                         protected void afterHookedMethod(MethodHookParam hook) {
                             InputMethodService service = (InputMethodService) hook.thisObject;
+                            reportWindowVisibility(service, true);
                             observeRotation(service);
                             configureWindow(service);
                             observeLayout(service);
@@ -62,6 +68,17 @@ final class DoubaoImeFullscreenHook {
                                     () -> fitCandidateToolbar(service), 600L);
                         }
                     });
+            try {
+                XposedHelpers.findAndHookMethod(InputMethodService.class, "hideWindow",
+                        new XC_MethodHook() {
+                            @Override protected void afterHookedMethod(MethodHookParam hook) {
+                                reportWindowVisibility((InputMethodService) hook.thisObject, false);
+                            }
+                        });
+            } catch (Throwable error) {
+                ModuleLogger.logHookFailure("Doubao keyboard window hidden state",
+                        "InputMethodService", "hideWindow", "()", error);
+            }
             Class<?> serviceClass = XposedHelpers.findClass(
                     "com.bytedance.android.doubaoime.ImeService", param.classLoader);
             XposedHelpers.findAndHookMethod(serviceClass, "onConfigurationChanged",
@@ -72,9 +89,19 @@ final class DoubaoImeFullscreenHook {
                             configureWindow(service);
                         }
                     });
-            XposedBridge.log("MixFlipCustom: Doubao cover keyboard integration loaded");
+            ModuleLogger.info("Doubao cover keyboard hooks registered");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: Doubao keyboard integration unavailable: " + error);
+            ModuleLogger.logFeatureState("Doubao IME cover adaptation", "PARTIAL",
+                    "一个或多个内部输入法 API 不匹配");
+            throw error;
+        }
+    }
+
+    private static void reportWindowVisibility(InputMethodService service, boolean visible) {
+        Boolean previous = WINDOW_VISIBLE_STATES.put(service, visible);
+        if (previous == null || previous.booleanValue() != visible) {
+            ModuleLogger.logFeatureState("Doubao keyboard window",
+                    visible ? "SHOWN" : "HIDDEN", "输入法窗口状态已变化");
         }
     }
 
@@ -164,7 +191,10 @@ final class DoubaoImeFullscreenHook {
                 toolbar.setTranslationX(targetTranslation);
             }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: Doubao candidate fitting failed: " + error);
+            if (!error.getClass().getName().equals(lastToolbarFailureClass)) {
+                lastToolbarFailureClass = error.getClass().getName();
+                ModuleLogger.logExceptionThrottled("Doubao candidate toolbar fitting failed", error);
+            }
         }
     }
 
@@ -215,7 +245,14 @@ final class DoubaoImeFullscreenHook {
             Window window = dialog == null ? null : dialog.getWindow();
             if (window == null) return;
             WindowManager.LayoutParams attrs = window.getAttributes();
-            if (isRotatedCover(service)) {
+            boolean cover = isRotatedCover(service);
+            if (lastCoverWindow == null || lastCoverWindow != cover) {
+                lastCoverWindow = cover;
+                ModuleLogger.logFeatureState("Doubao keyboard window",
+                        cover ? "SUCCESS" : "RESTORED",
+                        cover ? "外屏窗口允许使用镜头区域" : "已恢复原窗口布局");
+            }
+            if (cover) {
                 ORIGINAL_CUTOUT_MODES.putIfAbsent(window, attrs.layoutInDisplayCutoutMode);
                 if (attrs.layoutInDisplayCutoutMode
                         != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS) {
@@ -232,7 +269,10 @@ final class DoubaoImeFullscreenHook {
             }
             window.getDecorView().requestApplyInsets();
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: Doubao window setup failed: " + error);
+            if (!error.getClass().getName().equals(lastWindowFailureClass)) {
+                lastWindowFailureClass = error.getClass().getName();
+                ModuleLogger.logException("Doubao keyboard window setup failed", error);
+            }
         }
     }
 

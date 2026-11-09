@@ -169,22 +169,26 @@ public final class SettingsActivity extends Activity {
         // is opened, including after boot while the cover screen is already folded.
         getContentResolver().notifyChange(ImeScopeStatusProvider.URI, null);
         imeReplacementSwitch.setOnCheckedChangeListener(null);
-        String target = ImeReplacementSettings.readTarget(this);
+        ImeReplacementSettings.ReadResult preference = ImeReplacementSettings.readResult(this);
+        String target = preference.known ? preference.target : "";
         boolean enabled = ImeReplacementSettings.WECHAT_PACKAGE.equals(target);
         imeReplacementSwitch.setChecked(enabled);
+        imeReplacementSwitch.setEnabled(preference.known);
         bindImeReplacementSwitch();
         if (doubaoReplacementSwitch != null) {
             doubaoReplacementSwitch.setOnCheckedChangeListener(null);
             boolean doubao = ImeReplacementSettings.DOUBAO_PACKAGE.equals(target);
             doubaoReplacementSwitch.setChecked(doubao);
+            doubaoReplacementSwitch.setEnabled(preference.known);
             doubaoReplacementSummary.setText(doubao
                     ? "已开启：折叠时使用豆包输入法，展开后恢复原输入法。"
-                    : "开启后折叠时使用豆包输入法。");
+                    : preference.known ? "开启后折叠时使用豆包输入法。"
+                    : "输入法设置当前无法读取；请稍后刷新后再修改。");
             bindDoubaoReplacementSwitch();
         }
         if (imeReplacementSummary != null) {
             imeReplacementSummary.setText(buildImeReplacementSummary(
-                    enabled, getImeScopeStatus()));
+                    preference, getImeScopeStatus()));
         }
     }
 
@@ -198,6 +202,10 @@ public final class SettingsActivity extends Activity {
             String target = checked ? ImeReplacementSettings.DOUBAO_PACKAGE : "";
             if (!ImeReplacementSettings.writeTarget(this, target)) {
                 Toast.makeText(this, "设置未能保存，请重试", Toast.LENGTH_LONG).show();
+            } else {
+                ModuleLogger.logFeatureState("Doubao input-method replacement",
+                        checked ? "ENABLED" : "DISABLED",
+                        checked ? "用户已选择豆包输入法" : "用户已关闭豆包输入法替换");
             }
             renderImeReplacementSetting();
         });
@@ -216,10 +224,13 @@ public final class SettingsActivity extends Activity {
                 Toast.makeText(this, "设置未能保存，请重试", Toast.LENGTH_LONG).show();
                 return;
             }
+            ModuleLogger.logFeatureState("WeChat input-method replacement",
+                    enabled ? "ENABLED" : "DISABLED",
+                    enabled ? "用户已选择微信输入法" : "用户已关闭微信输入法替换");
             renderImeReplacementSetting();
             if (imeReplacementSummary != null) {
-                imeReplacementSummary.setText(buildImeReplacementSummary(
-                        enabled, getImeScopeStatus()));
+            imeReplacementSummary.setText(buildImeReplacementSummary(
+                    ImeReplacementSettings.readResult(this), getImeScopeStatus()));
             }
             Toast.makeText(this, enabled ? "已开启外屏微信输入法" : "已关闭外屏微信输入法",
                     Toast.LENGTH_SHORT).show();
@@ -237,24 +248,30 @@ public final class SettingsActivity extends Activity {
         try {
             return getContentResolver().call(ImeScopeStatusProvider.URI,
                     "get_scope_status", null, null);
-        } catch (Throwable ignored) {
+        } catch (Throwable error) {
+            ModuleLogger.logExceptionThrottled("Unable to read IME scope status", error);
             return null;
         }
     }
 
-    private String buildImeReplacementSummary(boolean enabled, Bundle scopeStatus) {
-        boolean systemScope = scopeStatus != null && scopeStatus.getBoolean("system", false);
-        boolean wechatScope = scopeStatus != null && scopeStatus.getBoolean("wechat", false);
-        String replacement = enabled
-                ? "已开启：折叠时自动使用微信输入法，展开后恢复原输入法。"
-                : "已关闭：仍可正常唤起系统当前输入法。";
-        String system = systemScope ? "系统进程回报：已收到。"
-                : "系统进程回报：未收到。";
-        String wechat = wechatScope
-                ? "微信输入法适配：已生效。"
-                : "微信输入法适配：未生效。";
-        return replacement + "\n" + system + "\n" + wechat
-                + "\n需要启用系统框架和微信输入法作用域。";
+    private String buildImeReplacementSummary(ImeReplacementSettings.ReadResult preference,
+                                              Bundle scopeStatus) {
+        String replacement = !preference.known
+                ? "输入法设置状态：未知（暂时无法读取，未按关闭处理）。"
+                : preference.target.isEmpty()
+                ? "已关闭：仍可正常唤起系统当前输入法。"
+                : "已开启：折叠时自动使用"
+                + (ImeReplacementSettings.WECHAT_PACKAGE.equals(preference.target)
+                ? "微信" : "豆包") + "输入法，展开后恢复原输入法。";
+        boolean bootKnown = scopeStatus != null && scopeStatus.getBoolean("bootCountKnown", false);
+        String system = !bootKnown ? "系统进程加载回报：未知。"
+                : scopeStatus.getBoolean("system", false) ? "系统进程加载回报：已收到。"
+                : "系统进程加载回报：本次启动尚未收到。请在 LSPosed 为 MixFlip 勾选“系统框架（System）”作用域，并在重启后重新检查。";
+        String wechat = !bootKnown ? "微信输入法加载回报：未知。"
+                : scopeStatus.getBoolean("wechat", false)
+                ? "微信输入法加载回报：已收到（不等于切换已经成功）。"
+                : "微信输入法加载回报：本次启动尚未观察到（不能据此判断适配未生效）。";
+        return replacement + "\n" + system + "\n" + wechat;
     }
 
     private void resetImeReplacementSwitch(boolean checked) {

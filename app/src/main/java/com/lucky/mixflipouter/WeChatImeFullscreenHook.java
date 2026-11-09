@@ -115,11 +115,15 @@ public final class WeChatImeFullscreenHook {
     private static final ThreadLocal<Boolean> APPLYING_KEYBOARD_DATA = new ThreadLocal<>();
     private static String lastObservedKeyboard;
     private static Boolean savedKeepSymbols;
+    private static Boolean lastSymbolRetentionState;
+    private static long lastPopupPositionLogAt;
     private static WeakReference<View> lastActiveKeyboard = new WeakReference<>(null);
     private static final Map<View, WeakReference<View>> LONG_PRESS_KEYBOARDS =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<InputMethodService, Boolean> WINDOW_VISIBLE_STATES =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
-    static void install(XC_LoadPackage.LoadPackageParam param) {
+    static void install(XC_LoadPackage.LoadPackageParam param) throws Throwable {
         if (!"com.tencent.wetype".equals(param.packageName)) return;
         try {
             installScopeReporter();
@@ -138,6 +142,7 @@ public final class WeChatImeFullscreenHook {
                         protected void afterHookedMethod(MethodHookParam hook) {
                             InputMethodService service =
                                     (InputMethodService) hook.thisObject;
+                            reportWindowVisibility(service, true);
                             reportWeChatScope(service);
                             Window window;
                             try {
@@ -145,8 +150,7 @@ public final class WeChatImeFullscreenHook {
                                 window = dialog == null ? null : dialog.getWindow();
                                 if (window == null) return;
                             } catch (Throwable error) {
-                                XposedBridge.log("MixFlipCustom: WeChat window setup failed: "
-                                        + error);
+                                ModuleLogger.logException("WeChat window setup failed", error);
                                 return;
                             }
                             View decor = window.getDecorView();
@@ -155,6 +159,17 @@ public final class WeChatImeFullscreenHook {
                             refreshDisplayState(service, decor);
                         }
                     });
+            try {
+                XposedHelpers.findAndHookMethod(InputMethodService.class, "hideWindow",
+                        new XC_MethodHook() {
+                            @Override protected void afterHookedMethod(MethodHookParam hook) {
+                                reportWindowVisibility((InputMethodService) hook.thisObject, false);
+                            }
+                        });
+            } catch (Throwable error) {
+                ModuleLogger.logHookFailure("WeChat keyboard window hidden state",
+                        "InputMethodService", "hideWindow", "()", error);
+            }
             XposedHelpers.findAndHookMethod(InputMethodService.class, "setInputView",
                     View.class, new XC_MethodHook() {
                         @Override
@@ -174,8 +189,7 @@ public final class WeChatImeFullscreenHook {
                                     restoreNativeLayoutAfterViewAttach((View) hook.args[0]);
                                 }
                             } catch (Throwable error) {
-                                XposedBridge.log("MixFlipCustom: input view refresh failed: "
-                                        + error);
+                                ModuleLogger.logException("WeChat input view refresh failed", error);
                             }
                         }
                     });
@@ -199,8 +213,7 @@ public final class WeChatImeFullscreenHook {
                                 new Handler(service.getMainLooper()).postDelayed(
                                         () -> refreshDisplayState(service, decor), 200L);
                             } catch (Throwable error) {
-                                XposedBridge.log("MixFlipCustom: created input view refresh "
-                                        + "failed: " + error);
+                                ModuleLogger.logException("WeChat created input view refresh failed", error);
                             }
                         }
                     });
@@ -219,13 +232,24 @@ public final class WeChatImeFullscreenHook {
                                     schedule(service, window.getDecorView(), 0);
                                 }
                             } catch (Throwable error) {
-                                XposedBridge.log("MixFlipCustom: candidate refresh failed: " + error);
+                                ModuleLogger.logExceptionThrottled("WeChat candidate refresh failed", error);
                             }
                         }
                     });
-            XposedBridge.log("MixFlipCustom: WeChat compact-display keyboard adaptation enabled");
+            ModuleLogger.logFeatureState("WeChat IME cover adaptation", "SUCCESS",
+                    "窗口与键盘布局 hooks 已注册");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: WeChat keyboard hook unavailable: " + error);
+            ModuleLogger.logFeatureState("WeChat IME cover adaptation", "PARTIAL",
+                    "一个或多个输入法内部 API 不匹配");
+            throw error;
+        }
+    }
+
+    private static void reportWindowVisibility(InputMethodService service, boolean visible) {
+        Boolean previous = WINDOW_VISIBLE_STATES.put(service, visible);
+        if (previous == null || previous.booleanValue() != visible) {
+            ModuleLogger.logFeatureState("WeChat keyboard window",
+                    visible ? "SHOWN" : "HIDDEN", "外屏输入法窗口状态已变化");
         }
     }
 
@@ -249,8 +273,14 @@ public final class WeChatImeFullscreenHook {
                         int offset = Math.round(rect.exactCenterX() * (1f - keyboard.getScaleX()));
                         params.leftMargin -= offset;
                         LONG_PRESS_KEYBOARDS.put(child, new WeakReference<>(keyboard));
+                        long now = System.currentTimeMillis();
+                        if (now - lastPopupPositionLogAt >= 5000L) {
+                            lastPopupPositionLogAt = now;
+                            ModuleLogger.logFeatureState("WeChat long-press popup",
+                                    "POSITIONED", "弹出位置已按键盘缩放比例校正");
+                        }
                     } catch (Throwable error) {
-                        XposedBridge.log("MixFlipCustom: float position failed: " + error);
+                        ModuleLogger.logException("WeChat long-press popup positioning failed", error);
                     }
                 }
             });
@@ -270,7 +300,8 @@ public final class WeChatImeFullscreenHook {
             });
             }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: long press hook unavailable: " + error);
+            ModuleLogger.logHookFailure("WeChat long-press popup positioning",
+                    "ViewGroup / wetype.plugin.hld.floatview", "addView / e", "View and LayoutParams", error);
         }
     }
 
@@ -289,7 +320,7 @@ public final class WeChatImeFullscreenHook {
                     });
             scopeReporterInstalled = true;
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: WeChat scope reporter hook unavailable: " + error);
+            ModuleLogger.logException("WeChat scope reporter hook unavailable", error);
         }
     }
 
@@ -309,12 +340,11 @@ public final class WeChatImeFullscreenHook {
                                 ImeScopeStatusProvider.URI, "report_scope", "wechat", null);
                         if (result != null && result.getBoolean("accepted", false)) {
                             scopeReported = true;
-                            XposedBridge.log("MixFlipCustom: WeChat IME scope active");
+                            ModuleLogger.info("WeChat IME process load beacon accepted");
                             return;
                         }
                     } catch (Throwable error) {
-                        XposedBridge.log("MixFlipCustom: WeChat scope report attempt failed: "
-                                + error);
+                        ModuleLogger.logException("WeChat IME scope report attempt failed", error);
                     }
                 }
             } catch (InterruptedException error) {
@@ -453,7 +483,7 @@ public final class WeChatImeFullscreenHook {
             rotationDisplayManager = manager;
             rotationDisplayListener = listener;
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: display rotation observer unavailable: " + error);
+            ModuleLogger.logException("WeChat display rotation observer unavailable", error);
         }
     }
 
@@ -503,8 +533,7 @@ public final class WeChatImeFullscreenHook {
                     KEYBOARD_BASELINES.put(keyboard, baseline);
                 } else {
                     ensureKeyboardBaseline(keyboard);
-                    XposedBridge.log("MixFlipCustom: captured native keyboard baseline on "
-                            + "normal view attach");
+                    ModuleLogger.debug("Captured native WeChat keyboard baseline on view attach");
                     return;
                 }
             }
@@ -513,9 +542,9 @@ public final class WeChatImeFullscreenHook {
             if (candidate != null) restoreLayout(candidate, keyboard);
             restoreKeyboard(keyboard);
             restorePunctuationRows();
-            XposedBridge.log("MixFlipCustom: restored native keyboard data on normal view attach");
+            ModuleLogger.info("Restored native WeChat keyboard layout on normal view attach");
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: native keyboard attach restore failed: " + error);
+            ModuleLogger.logException("WeChat native keyboard attach restore failed", error);
         }
     }
 
@@ -553,8 +582,7 @@ public final class WeChatImeFullscreenHook {
             Object value = XposedHelpers.callMethod(instance, methodName, keyboardType);
             return value instanceof Number ? ((Number) value).intValue() : 0;
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: native " + methodName
-                    + " keyboard width unavailable: " + error);
+            ModuleLogger.logException("WeChat native keyboard width API unavailable: " + methodName, error);
             return 0;
         }
     }
@@ -574,7 +602,7 @@ public final class WeChatImeFullscreenHook {
                 return;
             }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: native keyboard cache reset failed: " + error);
+            ModuleLogger.logException("WeChat native keyboard cache reset failed", error);
         }
     }
 
@@ -594,9 +622,8 @@ public final class WeChatImeFullscreenHook {
         boolean compact = isCompactCover(service);
         Boolean wasCompact = COMPACT_DISPLAY_STATES.put(decor, compact);
         if (wasCompact == null || wasCompact.booleanValue() != compact) {
-            XposedBridge.log("MixFlipCustom: cover layout state rotation="
-                    + getConfigurationDisplayRotation(service) + " compact=" + compact
-                    + " previous=" + wasCompact);
+            ModuleLogger.logFeatureState("WeChat cover layout", compact ? "SUCCESS" : "RESTORED",
+                    "rotation=" + getConfigurationDisplayRotation(service));
         }
         if (compact) {
             View normalMenu = findByClassName(decor,
@@ -702,7 +729,7 @@ public final class WeChatImeFullscreenHook {
             }
             configureEdgeToEdge(window, true);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: compact WeChat window setup failed: " + error);
+            ModuleLogger.logException("WeChat compact window setup failed", error);
         }
     }
 
@@ -721,7 +748,7 @@ public final class WeChatImeFullscreenHook {
                 }
             }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: normal WeChat window restore failed: " + error);
+            ModuleLogger.logException("WeChat normal window restore failed", error);
         }
     }
 
@@ -735,7 +762,7 @@ public final class WeChatImeFullscreenHook {
                 View previous = lastActiveKeyboard.get();
                 lastActiveKeyboard = new WeakReference<>(observed);
                 lastObservedKeyboard = state;
-                XposedBridge.log("MixFlipCustom: active keyboard " + state);
+                ModuleLogger.info("Active WeChat keyboard changed: " + state);
                 if (previous != null && previous != observed
                         && isRecreatableKeyboard(previous)
                         && isRecreatableKeyboard(observed)) {
@@ -754,7 +781,7 @@ public final class WeChatImeFullscreenHook {
             if (attempt == 0) {
                 StringBuilder hierarchy = new StringBuilder();
                 appendViewHierarchy(decor, hierarchy, 0, new int[]{100});
-                XposedBridge.log("MixFlipCustom: WeChat view lookup missing keyboard="
+                ModuleLogger.warn("WeChat view lookup missing keyboard="
                         + (keyboard != null) + " candidate=" + (candidate != null)
                         + " hierarchy=" + hierarchy);
             }
@@ -788,7 +815,7 @@ public final class WeChatImeFullscreenHook {
             centerSymbolKeyboardPages(keyboard);
             keyboard.invalidate();
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: WeChat cover layout failed: " + error);
+            ModuleLogger.logExceptionThrottled("WeChat cover layout adjustment failed", error);
             retry(service, decor, attempt, "layout adaptation failed");
         }
     }
@@ -810,8 +837,14 @@ public final class WeChatImeFullscreenHook {
                 XposedHelpers.setStaticBooleanField(action, "e", savedKeepSymbols);
                 savedKeepSymbols = null;
             }
+            if (lastSymbolRetentionState == null
+                    || lastSymbolRetentionState.booleanValue() != symbols) {
+                lastSymbolRetentionState = symbols;
+                ModuleLogger.logFeatureState("WeChat symbol keyboard state",
+                        symbols ? "RETAINED" : "RESTORED", "keyboardType=" + type);
+            }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: keep symbols open failed: " + error);
+            ModuleLogger.logException("WeChat symbol keyboard state update failed", error);
         }
     }
 
@@ -846,10 +879,10 @@ public final class WeChatImeFullscreenHook {
                 if (old.getParent() instanceof ViewGroup) {
                     ((ViewGroup) old.getParent()).removeView(old);
                 }
-                XposedBridge.log("MixFlipCustom: disposed inactive keyboard id=" + key
+                ModuleLogger.debug("Disposed inactive WeChat keyboard id=" + key
                         + " view=" + System.identityHashCode(old));
             } catch (Throwable error) {
-                XposedBridge.log("MixFlipCustom: inactive keyboard disposal failed: " + error);
+                ModuleLogger.logException("WeChat inactive keyboard disposal failed", error);
             }
         }, 800L);
     }
@@ -886,7 +919,7 @@ public final class WeChatImeFullscreenHook {
             }
             if (candidate != null) alignNormalKeyboardBottom(decor, candidate, keyboard);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: normal key fitting failed: " + error);
+            ModuleLogger.logException("WeChat normal key fitting failed", error);
         }
     }
 
@@ -1176,7 +1209,7 @@ public final class WeChatImeFullscreenHook {
             StringBuilder message = new StringBuilder("MixFlipCustom: invalid nine-key rows ")
                     .append(centers).append(" typical=").append(typicalHeight);
             for (Rect[] rects : saved.values()) message.append(" ").append(rects[0]);
-            XposedBridge.log(message.toString());
+            ModuleLogger.warn(message.toString());
             return;
         }
         int gap = Math.max(1, Math.round(2f * keyboard.getResources().getDisplayMetrics().density));
@@ -1265,7 +1298,7 @@ public final class WeChatImeFullscreenHook {
             menu.setScaleX(available / (float) nativeWidth);
             menu.setTranslationX(0);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: WeChat menu fitting failed: " + error);
+            ModuleLogger.logExceptionThrottled("WeChat menu fitting failed", error);
         }
     }
 
@@ -1628,7 +1661,7 @@ public final class WeChatImeFullscreenHook {
                 keyboard.getHeight(), keyboard.getTranslationX(),
                 keyboard.getResources().getDisplayMetrics().density,
                 nativeWidth, nativeT9Width);
-        XposedBridge.log("MixFlipCustom: captured native keyboard metrics type=" + type
+        ModuleLogger.debug("Captured native keyboard metrics type=" + type
                 + " width=" + nativeWidth + " t9=" + nativeT9Width
                 + " viewWidth=" + keyboard.getWidth());
         KEYBOARD_BASELINES.put(keyboard, baseline);
@@ -1691,7 +1724,7 @@ public final class WeChatImeFullscreenHook {
         baseline.appliedWidth = availableWidth;
         baseline.appliedMetricWidth = compactT9MetricWidth;
         if (isNineKeyKeyboardType(baseline.type)) {
-            XposedBridge.log("MixFlipCustom: T9 geometry height=" + keyboard.getHeight()
+            ModuleLogger.debug("WeChat T9 geometry height=" + keyboard.getHeight()
                     + " bounds=" + getKeyboardButtonBounds(keyboard) + " scale="
                     + appliedHeightScale + " lineHeights=" + baseline.lineHeight
                     + " gaps=" + scaledLineGapHeights(baseline, appliedHeightScale));
@@ -1805,7 +1838,7 @@ public final class WeChatImeFullscreenHook {
                 }
                 if (changed) list.requestLayout();
             } catch (Throwable error) {
-                XposedBridge.log("MixFlipCustom: punctuation row restore failed: " + error);
+                ModuleLogger.logException("WeChat punctuation row restore failed", error);
             }
         }
     }
@@ -1966,7 +1999,7 @@ public final class WeChatImeFullscreenHook {
                 return new Rect(left, top, right, bottom);
             }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: WeChat keyboard geometry unavailable: " + error);
+            ModuleLogger.logExceptionThrottled("WeChat keyboard geometry reflection failed", error);
         }
         return null;
     }
@@ -2072,7 +2105,7 @@ public final class WeChatImeFullscreenHook {
                             }
                         }));
                 WIDTH_HOOKS.put(loader, hooks);
-                XposedBridge.log("MixFlipCustom: native keyboard width hooks enabled for "
+                ModuleLogger.info("WeChat native keyboard width hooks enabled for "
                         + "rotated cover layout");
             } catch (Throwable error) {
                 for (XC_MethodHook.Unhook hook : hooks) hook.unhook();
@@ -2088,14 +2121,13 @@ public final class WeChatImeFullscreenHook {
                     try {
                         hook.unhook();
                     } catch (Throwable error) {
-                        XposedBridge.log("MixFlipCustom: native keyboard width hook removal "
-                                + "failed: " + error);
+                        ModuleLogger.logException("WeChat native keyboard width hook removal failed", error);
                     }
                 }
             }
             if (!WIDTH_HOOKS.isEmpty()) {
                 WIDTH_HOOKS.clear();
-                XposedBridge.log("MixFlipCustom: native keyboard width hooks disabled for "
+                ModuleLogger.info("WeChat native keyboard width hooks disabled for "
                         + "normal layout");
             }
         }
@@ -2132,10 +2164,10 @@ public final class WeChatImeFullscreenHook {
                 }
             }
             if (cleared == 0) {
-                XposedBridge.log("MixFlipCustom: independent key-width cache was not found");
+                ModuleLogger.debug("WeChat independent key-width cache was not found");
             }
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: key width cache refresh failed: " + error);
+            ModuleLogger.logException("WeChat key-width cache refresh failed", error);
         }
     }
 
@@ -2168,7 +2200,7 @@ public final class WeChatImeFullscreenHook {
             NORMAL_KEY_RECTS.remove(keyboard);
             ROTATED_SPACED_BUTTONS.remove(keyboard);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: WeChat keyboard restore failed: " + error);
+            ModuleLogger.logException("WeChat keyboard restore failed", error);
         }
     }
 
@@ -2251,7 +2283,7 @@ public final class WeChatImeFullscreenHook {
 
     private static void retry(InputMethodService service, View decor, int attempt, String reason) {
         if (attempt >= 12) {
-            XposedBridge.log("MixFlipCustom: WeChat keyboard layout did not settle: " + reason);
+            ModuleLogger.warn("WeChat keyboard layout did not settle: " + reason);
             return;
         }
         schedule(service, decor, attempt + 1);

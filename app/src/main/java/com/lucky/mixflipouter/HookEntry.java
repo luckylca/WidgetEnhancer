@@ -29,63 +29,195 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
-        if ("android".equals(param.packageName)) {
+        ModuleLogger.beginProcess(param.packageName, param.processName);
+        installLoggerContextBridge(param);
+        if (isSystemServer(param)) {
+            // This one-time LSPosed breadcrumb does not depend on our ContentProvider
+            // transport or on system_server having an Application Context yet.
+            XposedBridge.log("WidgetEnhancer: system_server load-package callback reached");
             // system_server: silence AppWidget bind consent for FlipHome.
-            AppWidgetBindHook.install(param.classLoader);
+            attemptHook("AppWidget binding grant", AppWidgetBindHook.class.getName(),
+                    "install", "system_server", () -> AppWidgetBindHook.install(param.classLoader));
             // HyperOS otherwise replaces the selected IME with Sogou on fold.
-            OuterScreenInputMethodHook.install(param.classLoader);
+            attemptHook("outer screen IME selection", OuterScreenInputMethodHook.class.getName(),
+                    "install", "system_server", () -> OuterScreenInputMethodHook.install(param.classLoader));
             return;
         }
         if (Contract.SYSTEM_UI_PACKAGE.equals(param.packageName)) {
             if (param.processName == null || Contract.SYSTEM_UI_PACKAGE.equals(param.processName)) {
-                SystemUiTileHook.install(param.classLoader);
+                attemptHook("quick settings tiles", SystemUiTileHook.class.getName(),
+                        "install", "SystemUI", () -> SystemUiTileHook.install(param.classLoader));
+            } else {
+                ModuleLogger.logHookSkipped("quick settings tiles", SystemUiTileHook.class.getName(),
+                        "install", "SystemUI secondary process");
             }
             return;
         }
         if (Contract.NETEASE_PACKAGE.equals(param.packageName)) {
             if (param.processName == null || Contract.NETEASE_PACKAGE.equals(param.processName)) {
-                NeteaseLyricHook.install(param.classLoader);
+                attemptHookStatus("NetEase lyric fallback", NeteaseLyricHook.class.getName(),
+                        "install", "player callbacks", () -> NeteaseLyricHook.install(param.classLoader));
+            } else {
+                ModuleLogger.logHookSkipped("NetEase lyric fallback", NeteaseLyricHook.class.getName(),
+                        "install", "secondary process");
             }
             return;
         }
         if (Contract.MAML_CACHE_PACKAGE.equals(param.packageName)) {
-            hookMamlCacheSource(param.classLoader);
+            attemptHookStatus("MAML cache source", "android.app.Application",
+                    "attach / Activity.onResume", "cache scan callbacks",
+                    () -> hookMamlCacheSource(param.classLoader));
             return;
         }
         if (Contract.PERSONAL_ASSISTANT_PACKAGE.equals(param.packageName)) {
-            SystemWidgetPickerHook.installAssistantPicker(param.classLoader);
+            attemptHook("system widget picker", SystemWidgetPickerHook.class.getName(),
+                    "installAssistantPicker", "system picker", () -> {
+                        if (!SystemWidgetPickerHook.installAssistantPicker(param.classLoader)) {
+                            throw new IllegalStateException(
+                                    "One or more system picker hook groups did not register");
+                        }
+                    });
             return;
         }
         if (Contract.VOICE_ASSIST_PACKAGE.equals(param.packageName)) {
-            CourseScheduleHook.install(param);
+            attemptHook("assistant course schedule", CourseScheduleHook.class.getName(),
+                    "install", "course provider", () -> CourseScheduleHook.install(param));
             return;
         }
         if ("com.tencent.wetype".equals(param.packageName)) {
-            WeChatImeFullscreenHook.install(param);
+            attemptHook("WeChat IME cover adaptation", WeChatImeFullscreenHook.class.getName(),
+                    "install", "InputMethodService window and keyboard layout", () ->
+                            WeChatImeFullscreenHook.install(param));
             return;
         }
         if ("com.bytedance.android.doubaoime".equals(param.packageName)) {
-            DoubaoImeFullscreenHook.install(param);
+            if (param.processName == null || param.packageName.equals(param.processName)) {
+                attemptHook("Doubao IME cover adaptation", DoubaoImeFullscreenHook.class.getName(),
+                        "install", "InputMethodService and candidate toolbar", () ->
+                                DoubaoImeFullscreenHook.install(param));
+            } else {
+                ModuleLogger.logHookSkipped("Doubao IME cover adaptation",
+                        DoubaoImeFullscreenHook.class.getName(), "install", "secondary process");
+            }
             return;
         }
         if (!Contract.TARGET_PACKAGE.equals(param.packageName)) return;
+        attemptHookStatus("MAML cache source", "android.app.Application",
+                "attach / Activity.onResume", "cache scan callbacks",
+                () -> hookMamlCacheSource(param.classLoader));
+        Class<?> infoClass;
         try {
-            hookMamlCacheSource(param.classLoader);
-            Class<?> infoClass = XposedHelpers.findClass(INFO_CLASS, param.classLoader);
-            hookCatalogue(param.classLoader, infoClass);
-            hookGroupTitle(param.classLoader);
-            hookRuntimeHost(param.classLoader, infoClass);
-            hookWallpaperColor(param.classLoader);
-            WidgetLimitHook.install(param.classLoader);
-            XposedBridge.log("MixFlipCustom: P0 hooks installed");
+            infoClass = XposedHelpers.findClass(INFO_CLASS, param.classLoader);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: unsupported FlipHome build: " + error);
+            ModuleLogger.logHookFailure("FlipHome core compatibility", INFO_CLASS, "<loadClass>",
+                    "required class", error);
+            ModuleLogger.logFeatureState("FlipHome", "FAILED", "必要 Widget API 类不存在");
+            return;
+        }
+        boolean catalogue = attemptHook("custom widget catalogue", CONFIG_CLASS, "loadAllWidget",
+                "() -> List", () -> hookCatalogue(param.classLoader, infoClass));
+        boolean groupTitle = attemptHook("widget group title", "FlipHome group title API",
+                "install", "group title", () -> hookGroupTitle(param.classLoader));
+        boolean runtime = attemptHook("widget runtime host", VIEW_MODEL_CLASS, "install",
+                "widget runtime", () -> hookRuntimeHost(param.classLoader, infoClass));
+        boolean wallpaper = attemptHook("wallpaper color", "FlipHome wallpaper API", "install",
+                "wallpaper color", () -> hookWallpaperColor(param.classLoader));
+        boolean limits = attemptHook("widget limit", WidgetLimitHook.class.getName(), "install",
+                "widget limit", () -> WidgetLimitHook.install(param.classLoader));
+        int successes = (catalogue ? 1 : 0) + (groupTitle ? 1 : 0) + (runtime ? 1 : 0)
+                + (wallpaper ? 1 : 0) + (limits ? 1 : 0);
+        ModuleLogger.logFeatureState("FlipHome hooks", successes == 5 ? "SUCCESS"
+                : successes > 0 ? "PARTIAL" : "FAILED", successes + "/5 integrations registered");
+    }
+
+    private static boolean isSystemServer(XC_LoadPackage.LoadPackageParam param) {
+        String process = param.processName;
+        if ("system".equals(param.packageName)) {
+            return process == null || "system".equals(process)
+                    || "system_server".equals(process);
+        }
+        if (!"android".equals(param.packageName)) return false;
+        // LSPosed can also target Android's separate resolver/dialog process.
+        // The system framework callbacks run in the android/system process.
+        return process == null || "android".equals(process)
+                || "system".equals(process) || "system_server".equals(process);
+    }
+
+    private interface HookOperation { void run() throws Throwable; }
+    private interface HookStatusOperation { boolean run() throws Throwable; }
+
+    private static boolean attemptHookStatus(String feature, String targetClass, String method,
+                                             String signature, HookStatusOperation operation) {
+        ModuleLogger.logHookStart(feature, targetClass, method, signature);
+        try {
+            if (!operation.run()) {
+                IllegalStateException incomplete = new IllegalStateException(
+                        "One or more hook groups did not register");
+                ModuleLogger.logHookFailure(feature, targetClass, method, signature, incomplete);
+                return false;
+            }
+            ModuleLogger.logHookSuccess(feature, targetClass, method, signature);
+            return true;
+        } catch (Throwable error) {
+            ModuleLogger.logHookFailure(feature, targetClass, method, signature, error);
+            return false;
+        }
+    }
+
+    private static boolean attemptHook(String feature, String targetClass, String method,
+                                       String signature, HookOperation operation) {
+        ModuleLogger.logHookStart(feature, targetClass, method, signature);
+        try {
+            operation.run();
+            ModuleLogger.logHookSuccess(feature, targetClass, method, signature);
+            return true;
+        } catch (Throwable error) {
+            ModuleLogger.logHookFailure(feature, targetClass, method, signature, error);
+            return false;
+        }
+    }
+
+    private static void installLoggerContextBridge(XC_LoadPackage.LoadPackageParam param) {
+        if (isSystemServer(param)) {
+            try {
+                Class<?> activityThread = Class.forName("android.app.ActivityThread");
+                Object thread = XposedHelpers.callStaticMethod(activityThread,
+                        "currentActivityThread");
+                Context context = (Context) XposedHelpers.callMethod(thread, "getSystemContext");
+                ModuleLogger.initialize(context, param.packageName, param.processName);
+                ImeScopeStatusProvider.reportLoaded(context, "system");
+                return;
+            } catch (Throwable error) {
+                ModuleLogger.logException("Unable to acquire system_server context", error);
+            }
+        }
+        try {
+            XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class,
+                    new XC_MethodHook() {
+                        @Override protected void afterHookedMethod(MethodHookParam hook) {
+                            try {
+                                ModuleLogger.initialize((Context) hook.args[0],
+                                        param.packageName, param.processName);
+                                if ("com.bytedance.android.doubaoime".equals(param.packageName)) {
+                                    ImeScopeStatusProvider.reportLoaded((Context) hook.args[0], "doubao");
+                                } else if ("com.tencent.wetype".equals(param.packageName)) {
+                                    ImeScopeStatusProvider.reportLoaded((Context) hook.args[0], "wechat");
+                                }
+                            } catch (Throwable error) {
+                                ModuleLogger.logException("Application attach logger setup failed", error);
+                            }
+                        }
+                    });
+        } catch (Throwable error) {
+            ModuleLogger.logException("Unable to hook Application.attach for logger", error);
         }
     }
 
     /** Cache files live in the launcher's private files directory, so scan them
      * in that package process and publish bounded copies through our Provider. */
-    private static void hookMamlCacheSource(ClassLoader loader) {
+    private static boolean hookMamlCacheSource(ClassLoader loader) {
+        boolean attachInstalled = false;
+        boolean resumeInstalled = false;
         try {
             XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class,
                     new XC_MethodHook() {
@@ -96,11 +228,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 scheduleMamlCacheScan(context);
                                 UnlockRecovery.onApplicationAttach(context, loader);
                             } catch (Throwable error) {
-                                XposedBridge.log("MixFlipCustom: MAML cache scan start failed: "
-                                        + error);
+                                ModuleLogger.logException("MAML cache scan start failed", error);
                             }
                         }
                     });
+            attachInstalled = true;
+        } catch (Throwable error) {
+            ModuleLogger.logHookFailure("MAML cache source attach", "android.app.Application",
+                    "attach", "Context", error);
+        }
+        try {
             XposedHelpers.findAndHookMethod(android.app.Activity.class, "onResume",
                     new XC_MethodHook() {
                         @Override
@@ -111,9 +248,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             }
                         }
                     });
+            resumeInstalled = true;
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: MAML cache scan hook unavailable: " + error);
+            ModuleLogger.logHookFailure("MAML cache source resume", "android.app.Activity",
+                    "onResume", "Activity", error);
         }
+        int installed = (attachInstalled ? 1 : 0) + (resumeInstalled ? 1 : 0);
+        ModuleLogger.logFeatureState("MAML cache source", installed == 2 ? "SUCCESS"
+                : installed == 1 ? "PARTIAL" : "FAILED",
+                installed + "/2 cache scan callbacks registered");
+        return installed == 2;
     }
 
     private static void scheduleMamlCacheScan(Context context) {
@@ -173,7 +317,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     report(context, "catalogue", true, "已注入 " + added + " 个 Widget");
                 } catch (Throwable error) {
                     report(currentFlipHomeContext(), "catalogue", false, error.toString());
-                    XposedBridge.log("MixFlipCustom: catalogue injection failed: " + error);
+                    ModuleLogger.logException("Custom widget catalogue injection failed", error);
                 }
             }
         });
@@ -202,7 +346,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return info;
         } catch (Throwable error) {
             report(context, "catalogue", false, "MAML 导入失败: " + error.getClass().getSimpleName());
-            XposedBridge.log("MixFlipCustom: maml catalogue entry failed: " + error);
+            ModuleLogger.logException("MAML catalogue entry creation failed", error);
             return null;
         }
     }
@@ -227,6 +371,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 out.getFD().sync();
             } catch (Throwable error) {
                 temporary.delete();
+                ModuleLogger.logException("MAML file copy failed", error);
                 return false;
             }
             if (!temporary.renameTo(mtz)) {
@@ -235,6 +380,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             return true;
         } catch (Throwable error) {
+            ModuleLogger.logException("MAML file installation failed", error);
             return false;
         }
     }
@@ -272,8 +418,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 prefs.edit().remove(installed).apply();
                 changed = true;
             }
-            if (changed) XposedBridge.log("MixFlipCustom: stale MAML imports cleaned");
-        } catch (Throwable ignored) {
+            if (changed) ModuleLogger.info("Stale MAML imports cleaned");
+        } catch (Throwable error) {
+            ModuleLogger.logException("Stale MAML import cleanup failed", error);
         }
     }
 
@@ -299,9 +446,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     Map<String, String> typeMap = (Map<String, String>)
                             XposedHelpers.getObjectField(hook.thisObject, "mWidgetTypeMap");
                     typeMap.put(Contract.CUSTOM_TYPE, "自定义");
-                    XposedBridge.log("MixFlipCustom: custom type map installed, size=" + typeMap.size());
+                    ModuleLogger.info("Custom widget type registered");
                 } catch (Throwable error) {
-                    XposedBridge.log("MixFlipCustom: type map injection failed: " + error);
+                    ModuleLogger.logException("Custom widget type registration failed", error);
                 }
             }
         });
@@ -336,7 +483,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             boolean dark = (Boolean) XposedHelpers.callStaticMethod(utils, "hasAppliedDarkWallpaper");
             WallpaperColorState.setDarkWallpaper(dark);
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: wallpaper color hook unavailable: " + error);
+            ModuleLogger.logException("Wallpaper color hook unavailable", error);
         }
         try {
             Class<?> bgHelper = XposedHelpers.findClass(
@@ -373,7 +520,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         }
                     });
         } catch (Throwable error) {
-            XposedBridge.log("MixFlipCustom: widget bg hook unavailable: " + error);
+            ModuleLogger.logException("Widget background hook unavailable", error);
         }
     }
 
@@ -395,7 +542,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             if (path == null && fallbackMamlPath != null) {
                                 XposedHelpers.setObjectField(info, "mResPath", fallbackMamlPath);
                             }
-                        } catch (Throwable ignored) {
+                        } catch (Throwable error) {
+                            ModuleLogger.logException("MAML resource path field lookup failed", error);
                         }
                     }
 
@@ -436,7 +584,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                             + " · host " + host.getWidth() + "×" + host.getHeight()));
                         } catch (Throwable error) {
                             report(context, "runtime", false, error.toString());
-                            XposedBridge.log("MixFlipCustom: runtime overlay failed: " + error);
+                            ModuleLogger.logException("Runtime widget overlay creation failed", error);
                         }
                     }
                 });
@@ -451,7 +599,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     fallbackMamlPath = (String) path;
                     return;
                 }
-            } catch (Throwable ignored) {
+            } catch (Throwable error) {
+                ModuleLogger.debug("MAML fallback path unavailable on a catalogue entry: "
+                        + error.getClass().getSimpleName());
             }
         }
     }
@@ -493,14 +643,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
         host.setBackgroundColor(Color.TRANSPARENT);
         host.setClickable(false);
         host.setFocusable(false);
-        try { XposedHelpers.callMethod(host, "setTouchable", false); } catch (Throwable ignored) {}
+        try { XposedHelpers.callMethod(host, "setTouchable", false); }
+        catch (Throwable error) {
+            ModuleLogger.debug("Optional MAML touchability API unavailable: "
+                    + error.getClass().getSimpleName());
+        }
     }
 
     private static Context currentFlipHomeContext() {
         try {
             Class<?> activityThread = Class.forName("android.app.ActivityThread");
             return (Context) XposedHelpers.callStaticMethod(activityThread, "currentApplication");
-        } catch (Throwable ignored) {
+        } catch (Throwable error) {
+            ModuleLogger.debug("FlipHome context not available yet: "
+                    + error.getClass().getSimpleName());
             return null;
         }
     }
@@ -513,7 +669,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             extras.putBoolean("ok", ok);
             extras.putString("message", message);
             context.getContentResolver().call(Contract.PROVIDER_URI, "report_hook", null, extras);
-        } catch (Throwable ignored) {
+        } catch (Throwable error) {
+            ModuleLogger.logException("Hook health report delivery failed", error);
         }
     }
 }
