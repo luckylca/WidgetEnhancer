@@ -2,7 +2,7 @@
 
 # WidgetEnhancer
 
-为 **Xiaomi MIX Flip 外屏**提供自定义小部件能力的 LSPosed 模块
+为 **Xiaomi MIX Flip 外屏**扩展自定义小部件与第三方输入法适配能力的 LSPosed 模块
 
 [![Release](https://img.shields.io/github/v/release/luckylca/WidgetEnhancer?label=Release)](https://github.com/luckylca/WidgetEnhancer/releases/latest)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
@@ -125,15 +125,23 @@ WidgetEnhancer 使用官方 SuperLyricApi 源码在自己的应用进程中接�
 
 即可将其添加到外屏。
 
+### 外屏输入法适配
+
+在「我的外屏」设置中，可以选择微信输入法或豆包输入法作为折叠状态下的外屏输入法。两个开关共用同一个替换目标，同一时间只会启用其中一种；展开后恢复原来的内屏输入法。
+
+- **微信输入法**：适配外屏键盘窗口与镜头区域，针对九宫格键盘宽度、符号键盘和长按弹出布局进行调整；展开后恢复原来的内屏布局。
+- **豆包输入法**：适配外屏窗口与镜头侧区域，调整候选工具栏宽度和横向位置，并在屏幕旋转或展开时恢复原始布局。
+- 输入法切换由 `system_server` 侧处理；键盘窗口和布局适配在对应输入法进程内执行。
+- 该功能依赖 HyperOS 内部实现及输入法自身的类结构，系统或输入法升级后可能需要重新适配。
+
 ## 实现原理
 
-WidgetEnhancer 基于 **LSPosed / Xposed Hook** 实现，主要作用于 Xiaomi MIX Flip 的外屏桌面进程：
+WidgetEnhancer 基于 **LSPosed / Xposed Hook** 实现，功能分布在外屏桌面、系统服务和输入法进程中：
 
-```text
-com.miui.fliphome
-```
-
-模块将自定义小部件信息注入 HyperOS 原有的小部件列表，并复用系统已有的小部件管理和页面机制。
+- `com.miui.fliphome`：注入自定义小部件，并接入 HyperOS 原有的小部件管理和运行时。
+- `android` / `system_server`：处理折叠状态下的输入法选择，以及 FlipHome 的 AppWidget 绑定授权。
+- `com.tencent.wetype`：适配微信输入法的外屏窗口和键盘布局。
+- `com.bytedance.android.doubaoime`：适配豆包输入法的外屏窗口和候选工具栏。
 
 ```mermaid
 flowchart TD
@@ -152,6 +160,13 @@ flowchart TD
     N --> O[HyperOS 原生小部件列表]
     O --> P[添加 / 删除 / 排序 / 持久化]
     P --> J
+    Q[输入法替换设置] --> R[ContentProvider / XSharedPreferences]
+    R --> S[system_server Hook]
+    S --> T[折叠时选择目标输入法 / 展开时恢复]
+    T --> U[微信输入法进程 Hook]
+    T --> V[豆包输入法进程 Hook]
+    U --> J
+    V --> J
 ```
 
 因此，小部件的添加、删除、排序、页面管理和持久化会尽可能继续使用 HyperOS 原有逻辑，模块主要负责自定义小部件的数据、配置与显示内容。
@@ -160,29 +175,45 @@ flowchart TD
 
 当前主要适配 **Xiaomi MIX Flip（ruyi）+ HyperOS**。
 
-当前仓库版本为 **WidgetEnhancer 0.9.11（versionCode 35）**。外屏微信输入法基础布局针对 **微信输入法 4.0.0（versionCode 58201）** 在 MIX Flip 实机适配并验证；本版新增九宫格宽度优化，仍需升级后在设备上复核，其它微信输入法版本尚未逐一验证。
+当前仓库构建版本为 **WidgetEnhancer 0.9.11（versionCode 35）**。微信输入法基础适配以 **微信输入法 4.0.0（versionCode 58201）** 为实机验证基线；近期代码继续调整九宫格宽度、符号键盘和长按弹出布局，发布前应在对应设备上完成回归。豆包输入法已加入独立适配，当前未声明经过完整验证的版本范围。
 
-由于不同 HyperOS 版本的内部实现可能存在差异，系统 OTA 后可能需要更新模块才能继续正常使用。
+模块使用了 HyperOS 和输入法内部类及方法。系统 OTA、输入法升级或目标应用内部实现变化，都可能影响对应 Hook；不同功能的兼容性也需要分别验证。
 
 ## LSPosed 作用域
 
-### 必选
+### 必选：外屏桌面
 
 ```text
 com.miui.fliphome
 ```
 
-这是模块的主要 Hook 目标。
+这是自定义小部件注入、目录管理和运行时渲染的主要 Hook 目标。
 
-### AppWidget 免授权绑定
+### 系统服务：输入法切换与 AppWidget 授权
 
 ```text
-android
+system
 ```
 
-用于在系统服务中仅为 `com.miui.fliphome` 放行 AppWidget 绑定权限，从而避免添加应用小部件时重复弹出系统授权确认。使用该功能时需要在新版 LSPosed 中勾选 `system` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。
+用于在 `system_server` 中处理折叠状态下的输入法选择，并为 FlipHome 处理 AppWidget 绑定授权。新版 LSPosed 通常显示为 `system`；如果旧版管理器没有该条目，请勾选 `android`。
 
-在应用「我的外屏」设置中开启「微信输入法替换官方输入法」后，HyperOS 会在折叠到外屏时选用微信输入法，并在展开时恢复之前保存的内屏输入法。还需在 LSPosed 中给本模块勾选 `system`、`com.tencent.wetype` 和 `com.lucky.mixflipouter` 作用域；旧版管理器若没有 `system` 条目，请勾选 `android`。设置开关现在允许在尚未收到作用域回报时先保存，状态区显示系统进程及微信输入法进程的实际回报；未收到回报不等于直接读取到 LSPosed 勾选状态，功能真正生效仍需正确启用作用域。外屏键盘布局适配还需要 `com.tencent.wetype` 作用域。外屏会将微信输入法窗口扩展到镜头侧区域，并针对九宫格键盘优化宽度；展开后保留原来的内屏键盘布局。
+### 按需启用：外屏输入法
+
+微信输入法：
+
+```text
+com.tencent.wetype
+```
+
+豆包输入法：
+
+```text
+com.bytedance.android.doubaoime
+```
+
+在「我的外屏」设置中选择其中一种输入法作为折叠状态下的替换输入法，并启用对应的 LSPosed 作用域。两个设置开关共用一个替换目标，不会同时选择两种输入法。微信输入法进程作用域还负责其键盘窗口、九宫格、符号键盘和长按布局适配；豆包输入法进程作用域负责其窗口和候选工具栏适配。
+
+输入法替换设置可以先保存，作用域是否真正生效仍取决于 LSPosed 是否加载了相应进程。当前微信输入法设置页会显示 system 和微信进程的启动回报；豆包进程尚未接入同样的独立状态回报。
 
 外屏输入法适配参考了 [MixFlipMod](https://github.com/parallelcc/MixFlipMod) 的机型思路，以及 [MIUI_IME_Unlock](https://github.com/RC1844/MIUI_IME_Unlock) 的全面屏键盘支持方式。
 
@@ -202,6 +233,14 @@ com.miui.personalassistant
 
 用于直接打开 HyperOS 系统桌面的小部件选择面板，并把选中的 AppWidget / MAML 小部件回传到 WidgetEnhancer。
 
+### 可选：小爱课程表
+
+```text
+com.miui.voiceassist
+```
+
+用于从小米小爱语音助手进程读取本地课程表数据。
+
 ### 可选：网易云音乐
 
 ```text
@@ -209,10 +248,6 @@ com.netease.cloudmusic
 ```
 
 保留网易云歌词 Hook fallback。SuperLyric 自己负责播放器适配；WidgetEnhancer 不需要把 LX Music、QQ 音乐、Spotify 等作用域加入本模块。
-
-### 可选：SuperLyric
-
-安装并启用 [SuperLyric](https://github.com/HChenX/SuperLyric)，并按其说明配置需要适配的播放器。WidgetEnhancer 会在自身进程中注册 Binder 接收器、主动请求当前歌词，并自动重试暂不可用的服务。
 
 ### 可选：SystemUI
 
@@ -222,12 +257,14 @@ com.android.systemui
 
 用于部分高级快捷设置功能。不使用相关功能时无需勾选。
 
+模块自身应用 `com.lucky.mixflipouter` 不依赖 Xposed Hook 运行，不需要为了打开配置应用而单独启用该作用域。
+
 ## 安装
 
 1. 从 [Releases](https://github.com/luckylca/WidgetEnhancer/releases/latest) 下载并安装 APK。
 2. 在 LSPosed 中启用 WidgetEnhancer。
-3. 至少勾选 `com.miui.fliphome` 作用域；需要导入系统桌面缓存时同时勾选 `com.miui.home`，需要直接调用系统桌面小部件面板时勾选 `com.miui.personalassistant`，需要 AppWidget 免授权绑定时同时勾选 `android`。
-4. 根据需要勾选网易云音乐或 SystemUI；需要高质量通用同步歌词时可另行安装并启用 SuperLyric，也可以直接使用内置在线歌词兼容模式。
+3. 至少勾选 `com.miui.fliphome`；需要系统输入法切换或 AppWidget 免授权绑定时，同时勾选 `system`（旧版 LSPosed 对应 `android`）。
+4. 使用微信或豆包外屏输入法时，在设置中选择对应输入法，并分别勾选 `com.tencent.wetype` 或 `com.bytedance.android.doubaoime`；其它作用域按需启用：`com.miui.home`（读取 MAML 缓存）、`com.miui.personalassistant`（系统小部件面板）、`com.miui.voiceassist`（小爱课程表）、`com.netease.cloudmusic`（网易云歌词 fallback）和 `com.android.systemui`（部分高级快捷设置）。需要高质量通用同步歌词时可另行安装并启用 SuperLyric，也可以直接使用内置在线歌词兼容模式。
 5. 重启手机。
 6. 打开 WidgetEnhancer 创建小部件。
 7. 进入「设置 → 外屏 → 小部件 → 自定义」添加小部件。
@@ -245,6 +282,18 @@ com.android.systemui
 | AppWidget 系统授权 | 未启用 `android` 作用域时，首次添加第三方应用小部件需完成系统绑定授权 |
 
 不使用对应功能时无需授予相关权限。
+
+## 运行日志与诊断导出
+
+模块 Hook 进程会把日志异步批量发送到独立的 `:logger` 接收进程，再统一写入模块私有的设备保护存储目录。队列和每批 IPC 均有字节数上限；当前 JSONL 文件上限为 5 MB，保留当前文件和最近 4 个轮转文件（最多约 25 MB）。`:logger` 会按事件 ID 去重，并区分接收、排队和已落盘状态；重要日志优先刷盘。服务或文件暂时不可用时，模块私有存储中的有界后备队列会在服务恢复后补写，同时保留最终丢失数量和原因。不申请公共存储权限。日志接收端按 UID、包名和实际进程名共同校验调用者，`system_server` 通过 UID 1000 单独校验。
+
+在「设置 → 诊断」中可以查看最近运行日志，按等级和进程筛选，并点开记录查看异常堆栈。页面分别提供「导出日志」和「导出诊断包」：日志 ZIP 只包含原始 JSONL 文件和 `manifest.json`；完整诊断 ZIP 还包含 `diagnostics/environment.json`、`diagnostics/hook_status.json`、`diagnostics/report.json` 和相同时间点的日志快照。两种 ZIP 都在后台生成并固定一致的日志快照。
+
+生成后可通过 Android 系统文件选择器保存 ZIP，也可通过原生分享面板发送。分享使用受限范围的 FileProvider `content://` URI 和读取授权；分享面板关闭或保存失败后，临时 ZIP 保留 24 小时以便重试，后续导出时清理过期文件。SAF 保存成功后会尽快删除临时 ZIP。manifest 记录导出时间、版本、文件大小、时间范围和读取状态；个别文件不可读时会列明原因并继续打包其他可读取日志。
+
+诊断页会列出本次启动中已观察到模块加载回报的进程、未观察到回报的进程及其安装状态。LSPosed 不提供可由模块读取的完整作用域勾选状态，因此「尚未观察到」只表示本次启动没有收到进程回报，不代表能够确认作用域未勾选。Hook 注册结果和功能运行状态分别记录；可选 Hook 缺失会单独显示，不会自动把整个功能判为失败。
+
+日志记录 Hook 安装结果、依赖和版本信息、关键功能状态变化以及异常堆栈；不会主动记录输入内容、通知正文、完整歌词或个人文件内容。通知小部件卡片自动跟随 Android 系统浅色/深色设置，不提供单独的主题开关；桌面壁纸上的其他文字和占位元素继续使用原有壁纸明暗适配。
 
 ## 签名与升级
 
