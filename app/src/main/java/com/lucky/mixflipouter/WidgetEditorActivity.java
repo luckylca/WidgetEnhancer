@@ -443,6 +443,7 @@ public final class WidgetEditorActivity extends Activity {
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(8), dp(20), 0);
         EditText search = edit("搜索应用名称或包名");
         content.addView(search, matchWrap());
         ListView list = new ListView(this);
@@ -472,7 +473,7 @@ public final class WidgetEditorActivity extends Activity {
 
         new MaterialAlertDialogBuilder(this)
                 .setTitle("选择通知应用")
-                .setView(content, dp(20), dp(8), dp(20), 0)
+                .setView(content)
                 .setPositiveButton("完成", (dialog, which) -> {
                     config.notificationFilterPackages.clear();
                     config.notificationFilterPackages.addAll(
@@ -821,6 +822,7 @@ public final class WidgetEditorActivity extends Activity {
         rows.setOrientation(LinearLayout.VERTICAL);
         ScrollView list = new ScrollView(this);
         list.setFillViewport(false);
+        list.setPadding(dp(8), 0, dp(8), 0);
         list.addView(rows, new ScrollView.LayoutParams(-1, -2));
         androidx.appcompat.app.AlertDialog[] pickerDialog =
                 new androidx.appcompat.app.AlertDialog[1];
@@ -867,7 +869,7 @@ public final class WidgetEditorActivity extends Activity {
 
         pickerDialog[0] = new MaterialAlertDialogBuilder(this)
                 .setTitle("选择外屏缓存小部件")
-                .setView(list, dp(8), 0, dp(8), 0)
+                .setView(list)
                 .setNegativeButton("取消", null)
                 .create();
         pickerDialog[0].show();

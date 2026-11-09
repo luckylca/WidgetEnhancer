@@ -211,16 +211,16 @@ final class PreviewRenderer {
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
         text.setColor(Color.WHITE);
         text.setTextSize(40);
-        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
         canvas.drawText("小爱课程表", 36, 59, text);
         text.setColor(0xffc8cbd2);
         text.setTextSize(25);
-        text.setTypeface(android.graphics.Typeface.create("sans-serif", 0));
+        text.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL));
         canvas.drawText(new SimpleDateFormat("M月d日  EEEE", Locale.CHINA)
                 .format(new Date()), 38, 103, text);
         text.setColor(0xff9be3d5);
         text.setTextAlign(Paint.Align.RIGHT);
-        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
         text.setTextSize(24);
         canvas.drawText("第 6 周", WIDTH - 38, 103, text);
         text.setTextAlign(Paint.Align.LEFT);
@@ -250,7 +250,7 @@ final class PreviewRenderer {
             card.setColor(accents[i]);
             canvas.drawRoundRect(26, top + 20, 34, top + cardHeight - 20, 4, 4, card);
             text.setColor(Color.WHITE);
-            text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+            text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
             text.setTextSize(46);
             float centerY = top + cardHeight * 0.46f;
             canvas.drawText(samples[i][0], 54, centerY, text);
@@ -259,7 +259,7 @@ final class PreviewRenderer {
             text.setTextSize(25);
             canvas.drawText(samples[i][1], WIDTH - 43, centerY, text);
             text.setTextAlign(Paint.Align.LEFT);
-            text.setTypeface(android.graphics.Typeface.create("sans-serif", 0));
+            text.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL));
             text.setColor(0xffc1c5ce);
             text.setTextSize(27);
             canvas.drawText(samples[i][2], 54, centerY + 47, text);

@@ -248,8 +248,9 @@ final class CourseScheduleWidgetView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(color);
         paint.setTextSize(size);
-        paint.setTypeface(bold ? android.graphics.Typeface.create("sans-serif-medium", 0)
-                : android.graphics.Typeface.create("sans-serif", 0));
+        paint.setTypeface(bold
+                ? android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                : android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL));
         paint.setTextAlign(align);
         String drawn = value == null ? "" : value;
         if (paint.measureText(drawn) > maxWidth) {
